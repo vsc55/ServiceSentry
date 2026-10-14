@@ -121,7 +121,9 @@ function _dceDown(ev) {
     const item = ((_dcimRack || {}).items || []).find(i => i.uid === caja.dataset.dce);
     // Lo ajeno se dibuja ocupando y anónimo: poder arrastrarlo sería poder reorganizar el
     // armario de otro sin verlo.
-    if (!item || item.foreign) return;
+    // Y lo que no tiene U —una regleta vertical en su canal— no se arrastra por U: su sitio
+    // es un canal, y se cambia en su ficha.
+    if (!item || item.foreign || String(item.placement || 'u') !== 'u') return;
     const p = ssCanvasPoint(_DCE_SVG, ev);
     if (!p) return;
     const rack = (_dcimRack || {}).rack || {};
@@ -132,8 +134,49 @@ function _dceDown(ev) {
                 origen: Number(item.u_start || 1),
                 size: Math.max(1, Number(item.u_height || 1)),
                 agarre: _dceUAt(rack, p.y) - Number(item.u_start || 1),
-                from: p, moved: false};
-    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+                from: p, moved: false,
+                // Where the press was ON SCREEN, and the element and pointer to capture later.
+                cx: ev.clientX, cy: ev.clientY, el: ev.currentTarget, pid: ev.pointerId,
+                captured: false};
+    // **No capture yet.** Capturing here retargets the `click` and `dblclick` that follow to
+    // the `<svg>`, so a plain click on a server never reached its `onclick` and nothing in a U
+    // opened from the drawing. The capture waits for a real drag (`_dceMove`).
+}
+
+//: The click that opens a box's form waits this long for a second one: a box answers a click
+//: (its form) AND a double click (its parts), and the form's dialog, opened at once, covered the
+//: drawing before the second click arrived — so the double click never reached anything.
+const _DCE_DBL_MS = 250;
+let _dceClickT = 0;
+
+/** A click on a box in a U: its form, unless it turns out to be the first half of a double
+ *  click. The second click of the pair (`detail > 1`) only cancels the pending one. */
+function _dceClick(ev, uid) {
+    clearTimeout(_dceClickT);
+    _dceClickT = 0;
+    if (ev && ev.detail > 1) return;
+    _dceClickT = setTimeout(() => { _dceClickT = 0; _dcimOpen('edit', 'item', '', uid); },
+                            _DCE_DBL_MS);
+}
+
+/** A double click on a box: its parts, and the form the first click asked for is not opened. */
+function _dceDbl(uid) {
+    clearTimeout(_dceClickT);
+    _dceClickT = 0;
+    _dcPartsOpen(uid);
+}
+
+//: How far the pointer has to travel, in screen pixels, before a press becomes a drag.
+const _DCE_DRAG_MIN = 3;
+
+/** Whether this move has turned the press into a drag. In screen pixels when the event says
+ *  where it is; in drawing units otherwise (a synthetic event), which at the usual zoom is the
+ *  same order of size. */
+function _dceDragStarted(drag, ev, p) {
+    const pantalla = Number.isFinite(ev.clientX) && Number.isFinite(drag.cx);
+    const dx = pantalla ? ev.clientX - drag.cx : p.x - drag.from.x;
+    const dy = pantalla ? ev.clientY - drag.cy : p.y - drag.from.y;
+    return Math.hypot(dx, dy) >= _DCE_DRAG_MIN;
 }
 
 function _dceMove(ev) {
@@ -141,6 +184,13 @@ function _dceMove(ev) {
     const rack = (_dcimRack || {}).rack;
     const p = ssCanvasPoint(_DCE_SVG, ev);
     if (!rack || !p) return;
+    if (!_dceDrag.captured) {
+        if (!_dceDragStarted(_dceDrag, ev, p)) return;
+        // Now it IS a drag: from here the drawing is redrawn under the pointer, and without
+        // the capture the hand that drags would be lost with the replaced boxes.
+        _dceDrag.captured = true;
+        _dceDrag.el?.setPointerCapture?.(_dceDrag.pid);
+    }
     // A la U más cercana, ya: no hay medias U —un equipo va atornillado a un agujero o no va— y
     // redondear al soltar haría que lo que se ve durante el arrastre no fuese lo que se guarda.
     const u = Math.max(1, Math.min(Number(rack.u_height || 1) - _dceDrag.size + 1,
@@ -297,7 +347,129 @@ function _dceY(rack, u) {
 }
 
 function _dceFaceX(face) {
-    return _DCE.PAD + (face === 'rear' ? _DCE.W + _DCE.GAP : 0);
+    // With channels, each face has one on each side: the rear's, where the strips are, and the
+    // front's, where the same strips are shown again faded and mirrored (`_dceSides`). Without
+    // any, the drawing is the one it always was.
+    const izq = _dceCh ? _dceCh + _DCE_NUM : 0;
+    return _DCE.PAD + izq + (face === 'rear' ? _DCE.W + _DCE.GAP + 2 * _dceCh : 0);
+}
+
+/** How wide the whole drawing is: two faces, the gap and, when the rack carries 0U strips, a
+ *  channel on each side of each face (the front's left one with room for the U numbers). */
+function _dceWidth() {
+    const izq = _dceCh ? _dceCh + _DCE_NUM : 0;
+    return _DCE.PAD * 2 + izq + _DCE.W * 2 + _DCE.GAP + 3 * _dceCh;
+}
+
+/** **Dónde va cada cosa de 0U del armario** (`placement = 'side'`, una regleta vertical): en
+ *  qué canal trasero —`left` o `right`, mirando el armario POR DETRÁS, que es desde donde se
+ *  monta y se enchufa— y en qué orden dentro de él: `slot` 0 es la de fuera, pegada al lateral,
+ *  y 1 la de dentro, junto al mástil.
+ *
+ *  Lo dice la ficha (`side_pos`, `side_slot`); lo que no lo dice es **automático**, la regla de
+ *  siempre: la primera a la izquierda, la segunda a la derecha, alternando. Dos que pidan el
+ *  mismo sitio no se pisan: la segunda pasa al siguiente hacia dentro.
+ *
+ *  Una sola regla para el alzado y para el 3D (`_dcr3dScene`): si cada uno la contara a su
+ *  manera, la regleta saldría a la izquierda en un dibujo y a la derecha en el otro.
+ *  Devuelve ``{uid: {side, slot, auto}}``. */
+function _dcimSidePlaces(items) {
+    const lados = (items || []).filter(
+        i => !i.parent_uid && String(i.placement || 'u') === 'side');
+    const out = {}, usados = {left: [], right: []};
+    const toma = (lado, quiere) => {
+        let s = Math.max(0, Number(quiere) || 0);
+        while (usados[lado].includes(s)) s++;
+        usados[lado].push(s);
+        return s;
+    };
+    const dicho = (i) => ({'rear-left': 'left', 'rear-right': 'right'})[String(i.side_pos || '')];
+    // Primero lo que se ha dicho, por su orden pedido: un automático no le quita el sitio a uno
+    // que lo pidió.
+    lados.filter(dicho)
+        .map((i, n) => ({i, n})).sort((a, b) => (Number(a.i.side_slot) || 0)
+                                                - (Number(b.i.side_slot) || 0) || a.n - b.n)
+        .forEach(({i}) => {
+            const lado = dicho(i);
+            out[i.uid] = {side: lado, slot: toma(lado, i.side_slot), auto: false};
+        });
+    let n = 0;
+    lados.filter(i => !dicho(i)).forEach(i => {
+        const lado = (n++ % 2) ? 'right' : 'left';
+        out[i.uid] = {side: lado, slot: toma(lado, 0), auto: true};
+    });
+    return out;
+}
+
+//: Lo que se reserva a cada lado de la cara trasera para sus canales: nada si el armario no
+//: lleva nada de 0U —el dibujo de siempre—, y el ancho de las regletas que haya si lleva.
+let _dceCh = 0;
+const _DCE_SW = 16, _DCE_SG = 3, _DCE_NUM = 22;
+
+function _dceChFor(items) {
+    const sitios = Object.values(_dcimSidePlaces(items));
+    if (!sitios.length) return 0;
+    const n = Math.max(...sitios.map(s => s.slot)) + 1;
+    return n * (_DCE_SW + _DCE_SG) + 4;
+}
+
+/** Las regletas verticales, en sus canales a los lados de la cara trasera: la izquierda de
+ *  quien mira por detrás, a la izquierda del dibujo trasero —que ya está dibujado como se ve
+ *  por detrás—, y la de fuera más lejos del mástil que la de dentro.
+ *
+ *  **And beside the front face too**, faded and dashed: a strip is mounted at the back, but
+ *  whoever looks for it from the front has to find it as well, and click it. Mirrored, because
+ *  the rear's left is the front's right — the same rule as `_dceFlipX`.
+ *
+ *  **Coloured by their strip's branch** (`_dcPduColor`, the colour the 3D and the power marks
+ *  use), not outlined by the device's state: an 11 px outline in a state colour was nearly
+ *  invisible in the dark theme, and the branch is what somebody looking for a strip needs. A
+ *  strip nobody declared as a PDU gets the colour of «no branch». The state, when the strip
+ *  answers to a device, is a dot at its top. */
+function _dceSides(rack, items, face) {
+    const sitios = _dcimSidePlaces(items);
+    const uids = Object.keys(sitios);
+    if (!uids.length) return '';
+    const cara = face || 'rear';
+    const fantasma = cara !== 'rear';
+    const n = Math.max(...uids.map(u => sitios[u].slot)) + 1;
+    const x0 = _dceFaceX(cara);
+    const h = Number(rack.u_height || 0) * _DCE.U;
+    const pdus = (_dcPower || {}).pdus || [];
+    return uids.map(uid => {
+        const item = (items || []).find(i => i.uid === uid) || {};
+        const s = sitios[uid];
+        // Seen from the front, the rear's left channel is on the right.
+        const lado = fantasma ? (s.side === 'left' ? 'right' : 'left') : s.side;
+        const p = n - 1 - s.slot;                       // cuántas hay entre ella y el mástil
+        const x = lado === 'left' ? x0 - _DCE_NUM - (p + 1) * _DCE_SW - p * _DCE_SG
+                                  : x0 + _DCE.W + 3 + p * (_DCE_SW + _DCE_SG);
+        const y = _DCE.TOP;
+        const regleta = pdus.find(q => String(q.item_uid || '') === uid);
+        const tone = item.foreign ? 'var(--bs-secondary-color)'
+                   : (regleta ? _dcPduColor(regleta.uid, pdus) : _dcPduColor('', []));
+        const name = item.foreign ? t('dcim_foreign') : _dcimItemName(item);
+        const cx = x + _DCE_SW / 2, cy = y + h / 2;
+        const estado = !item.foreign && item.device_uid
+            ? `<circle cx="${cx}" cy="${y + 6}" r="3" fill="${escAttr(deviceStateColor(item.state || ''))}"
+                   stroke="var(--bs-body-bg)" stroke-width="1"></circle>` : '';
+        return `<g class="ss-pointer" data-dce="${escAttr(uid)}" data-dce-side="${s.side}"
+                   data-dce-slot="${s.slot}"${fantasma ? ' data-dce-ghost="1" opacity="0.6"' : ''}
+                   onpointerenter="_dceHover(${jsStr(uid)})"
+                   onpointerleave="_dceHover('')"
+                   ${item.foreign ? '' : `onclick="_dcimOpen('edit','item','',${jsStr(uid)})"`}>
+            <title>${escAttr(name)}</title>
+            <rect x="${x}" y="${y}" width="${_DCE_SW}" height="${h}" rx="3"
+                  fill="${escAttr(tone)}" fill-opacity="${fantasma ? 0.18 : 0.35}"
+                  stroke="${escAttr(tone)}" stroke-width="2"${
+                  fantasma ? ' stroke-dasharray="4 3"' : ''}></rect>
+            ${estado}
+            ${_dceNames ? `<text class="ss-svg-halo" x="${cx}" y="${cy + 3}" font-size="9"
+                  text-anchor="middle" transform="rotate(-90 ${cx} ${cy})"
+                  fill="currentColor">${esc(_dceClip(name, Math.max(6, Math.round(h / 6))))}</text>`
+                : ''}
+        </g>`;
+    }).join('');
 }
 
 /** The whole drawing: two faces, their U rails, and what is bolted into them.
@@ -318,7 +490,8 @@ function _dcimElevation(rack, items) {
     const h = Number(rack.u_height || 0);
     if (!h) return '';
     const height = _DCE.TOP + h * _DCE.U + _DCE.PAD;
-    const width = _DCE.PAD * 2 + _DCE.W * 2 + _DCE.GAP;
+    _dceCh = _dceChFor(items);
+    const width = _dceWidth();
     const firma = `${width}x${height}`;
     if (firma !== _dceLast) {
         _dceLast = firma;
@@ -394,6 +567,7 @@ function _dceMarksLegend() {
 }
 
 function _dceContent(rack, items) {
+    _dceCh = _dceChFor(items);
     return ['front', 'rear'].map(face => _dceFace(rack, items, face)).join('');
 }
 
@@ -408,6 +582,8 @@ function _dceContent(rack, items) {
  *  Con su nombre y pulsables, como cualquier otra caja: lo único que no tienen es sitio en la
  *  rejilla. */
 function _dceBesideHtml(items) {
+    // 0U strips TOO, although they are drawn in their channels (`_dceSides`): a strip 16 px
+    // wide is a small thing to aim at, and this list is where people look for what has no U.
     const fuera = (items || []).filter(
         i => !i.parent_uid && String(i.placement || 'u') !== 'u');
     if (!fuera.length) return '';
@@ -461,6 +637,7 @@ function _dceFace(rack, items, face) {
         ${rails.join('')}
         ${mine.map(i => _dceItem(rack, i, face)).join('')}
         ${mine.map(i => _dceKids(rack, i, face)).join('')}
+        ${_dceSides(rack, items, face)}
     </g>`;
 }
 
@@ -546,9 +723,9 @@ function _dceItem(rack, item, face) {
     return `<g class="ss-pointer" data-dce="${escAttr(item.uid)}"
                onpointerenter="_dceHover(${jsStr(item.uid)})"
                onpointerleave="_dceHover('')"
-               ${item.foreign ? '' : `onclick="_dcimOpen('edit','item','',${
+               ${item.foreign ? '' : `onclick="_dceClick(event,${
                     jsStr(item.uid)})"`}
-               ${item.foreign ? '' : `ondblclick="event.stopPropagation();_dcPartsOpen(${
+               ${item.foreign ? '' : `ondblclick="event.stopPropagation();_dceDbl(${
                     jsStr(item.uid)})"`}>
         <!-- Un botón, no solo el doble clic: un gesto que nadie descubre es una función que no
              existe, y esto se descubrió justo así — preguntando dónde se configuraba. -->
@@ -620,9 +797,9 @@ function _dceKids(rack, padre, face) {
         return `<g class="ss-pointer" data-dce="${escAttr(kid.uid)}"
                    onpointerenter="_dceHover(${jsStr(kid.uid)})"
                    onpointerleave="_dceHover('')"
-                   ${kid.foreign ? '' : `onclick="_dcimOpen('edit','item','',${
+                   ${kid.foreign ? '' : `onclick="_dceClick(event,${
                         jsStr(kid.uid)})"`}
-                   ${kid.foreign ? '' : `ondblclick="event.stopPropagation();_dcPartsOpen(${
+                   ${kid.foreign ? '' : `ondblclick="event.stopPropagation();_dceDbl(${
                         jsStr(kid.uid)})"`}>
             <title>${escAttr(name)}</title>
             <rect x="${r.x + 1}" y="${r.y}" width="${r.w - 2}" height="${r.h}" rx="2"
@@ -727,6 +904,12 @@ function _dceCard() {
 
 function _dceSpan(item) {
     // What takes no U says where it is instead: «U0» reads as a U that does not exist.
+    // Lo de un canal trasero dice cuál: «Sin U · Trasera izquierda · exterior».
+    const canal = String(item.placement || '') === 'side'
+        ? _dcimSidePlaces(((_dcimRack || {}).items) || [item])[item.uid] : null;
+    if (canal)
+        return [t('dcim_place_col_side'), t('dcim_side_pos_rear-' + canal.side),
+                t('dcim_side_slot_' + Math.min(1, canal.slot)).toLowerCase()].join(' · ');
     if (String(item.placement || 'u') !== 'u')
         return t('dcim_place_col_' + item.placement) + ' · ' + t('dcim_face_' + (item.face || 'full'));
     const u = Number(item.u_start || 0);

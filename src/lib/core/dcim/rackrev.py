@@ -30,7 +30,11 @@ from __future__ import annotations
 #: tabla de versiones y lo que se le pregunta a un armario de hace seis meses es qué había, dónde
 #: y con qué número de serie — no el fondo en milímetros de cada caja.
 CAMPOS = ('uid', 'label', 'u_start', 'u_height', 'face', 'role', 'serial', 'asset',
-          'device_uid', 'parent_uid', 'u_slots', 'u_slot', 'u_slot_span', 'u_split', 'placement')
+          'device_uid', 'parent_uid', 'u_slots', 'u_slot', 'u_slot_span', 'u_split', 'placement',
+          'side_pos', 'side_slot')
+
+#: Lo que se empezó a guardar más tarde: una foto anterior no lo lleva, y eso no es un cambio.
+_LATER = ('placement', 'side_pos', 'side_slot')
 
 #: Y del armario. Su nombre y su altura son lo que cambia de sitio a las demás cosas.
 CAMPOS_RACK = ('name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid')
@@ -123,8 +127,9 @@ def compare(antes: dict, ahora: dict) -> list[dict]:
         for campo in CAMPOS:
             if campo == 'uid' or viejo.get(campo) == nuevo.get(campo):
                 continue
-            # A photo from before `placement` was kept has no such key: that is not a change.
-            if campo == 'placement' and campo not in viejo:
+            # A photo from before `placement` (or the side channel) was kept has no such key:
+            # that is not a change.
+            if campo in _LATER and campo not in viejo:
                 continue
             fuera.append({'kind': 'edit', 'uid': uid,
                           'label': str(nuevo.get('label') or viejo.get('label') or ''),

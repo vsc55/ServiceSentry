@@ -13,6 +13,8 @@ and stay in the routes; the CLI runs as an operator and doesn't apply them.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -510,3 +512,68 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
     touch_entity(user, actor)
     return {'changes': changes, 'password_reset': password_reset, 'disabled': disabled,
             'login_revoked': login_revoked}
+
+
+# ── Sidebar order (a user's own arrangement of the left menu) ──────────────
+#
+# Stored in the user's record (the `extra` JSON column) as
+# ``{'top': [key, …], 'groups': {group: [key, …]}}`` — the entries' stable ids, never their
+# labels: the labels are translated and sorted per language, the ids are not. The client
+# merges it with the order the server draws (see `_sbMergeOrder`), so the bounds below only
+# have to keep the record small and well-formed; what the keys NAME is not checked against the
+# current menu on purpose — a section that is off today (its module disabled, a permission not
+# yet granted) must keep its place for the day it comes back.
+SIDEBAR_KEY_MAX = 64
+SIDEBAR_LIST_MAX = 200        # entries per level — the menu has a few dozen
+SIDEBAR_GROUPS_MAX = 16       # groups the record may name — the menu has two
+SIDEBAR_BYTES_MAX = 16384     # the whole preference, serialised
+_SIDEBAR_KEY_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,%d}' % (SIDEBAR_KEY_MAX - 1))
+
+
+def _sidebar_key_ok(key) -> bool:
+    return isinstance(key, str) and bool(_SIDEBAR_KEY_RE.fullmatch(key))
+
+
+def validate_sidebar_order(value) -> dict | None:
+    """The sidebar order to store, normalised — or ``None`` for "back to the default".
+
+    Raises :class:`AdminOpError` (``invalid_sidebar_order``) on anything that is not the
+    documented shape or exceeds its bounds. Duplicates are dropped (first one wins) rather
+    than refused: they say nothing a merge could not settle, and refusing them would make a
+    harmless client slip look like an attack."""
+    if value is None or value == {} or value == []:
+        return None
+    if not isinstance(value, dict) or set(value) - {'top', 'groups'}:
+        raise AdminOpError('invalid_sidebar_order')
+    try:
+        size = len(json.dumps(value, ensure_ascii=False))
+    except (TypeError, ValueError):
+        raise AdminOpError('invalid_sidebar_order') from None
+    if size > SIDEBAR_BYTES_MAX:
+        raise AdminOpError('invalid_sidebar_order')
+
+    def _keys(lst) -> list:
+        if not isinstance(lst, list) or len(lst) > SIDEBAR_LIST_MAX:
+            raise AdminOpError('invalid_sidebar_order')
+        out = []
+        for k in lst:
+            if not _sidebar_key_ok(k):
+                raise AdminOpError('invalid_sidebar_order')
+            if k not in out:
+                out.append(k)
+        return out
+
+    top = _keys(value.get('top', []))
+    groups_in = value.get('groups', {})
+    if not isinstance(groups_in, dict) or len(groups_in) > SIDEBAR_GROUPS_MAX:
+        raise AdminOpError('invalid_sidebar_order')
+    groups = {}
+    for g, lst in groups_in.items():
+        if not _sidebar_key_ok(g):
+            raise AdminOpError('invalid_sidebar_order')
+        keys = _keys(lst)
+        if keys:
+            groups[g] = keys
+    if not top and not groups:
+        return None
+    return {'top': top, 'groups': groups}

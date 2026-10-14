@@ -97,7 +97,7 @@ class TestWhatTheDemoHolds:
         """Each item, checked against the others as the API would check a move to its own
         place: it has to fit with everything else still there."""
         store, made, _path = built
-        for room in store.rooms_of(made['site']) + store.rooms_of(made['site_dr']):
+        for room in [r for k in demo.UID_KEYS for r in store.rooms_of(made[k])]:
             for rack in store.racks_of(room['uid']):
                 for it in store.items_of(rack['uid']):
                     if it['placement'] != 'u' or it['parent_uid']:
@@ -139,7 +139,8 @@ class TestWhatTheDemoHolds:
         assert any(floor_of[c['a_item']] != floor_of.get(c['b_item']) for c in cables
                    if c['b_item'] in floor_of)
         links = store.links_of([made['site']])
-        assert len(links) == 2 and all(l['b_site'] == made['site_dr'] for l in links)
+        assert sorted(l['b_site'] for l in links) == sorted(
+            [made['site_dr'], made['site_dr'], made['site_tx'], made['site_za'], made['site_tw']])
 
     def test_what_is_bolted_shows_a_picture(self, built):
         """Asked for from the screen: the demo's items were plain boxes. Each one that is not a
@@ -149,7 +150,7 @@ class TestWhatTheDemoHolds:
         store, made, _path = built
         cat = CatalogStore(store._db)
         sin = []
-        for site in (made['site'], made['site_dr']):
+        for site in (made[k] for k in demo.UID_KEYS):
             for room in store.rooms_of(site):
                 for rack in store.racks_of(room['uid']):
                     for it in store.items_of(rack['uid']):
@@ -172,7 +173,7 @@ class TestWhatTheDemoHolds:
         assert all(r['ports_placed'] == r['ports_total'] for r in modelos.values())
         assert sum(r['ports_total'] for r in modelos.values()) > 200
         items = {}
-        for room in store.rooms_of(made['site']) + store.rooms_of(made['site_dr']):
+        for room in [r for k in demo.UID_KEYS for r in store.rooms_of(made[k])]:
             for rack in store.racks_of(room['uid']):
                 for it in store.items_of(rack['uid']):
                     items[it['uid']] = it
@@ -559,7 +560,7 @@ class TestItsWords:
         names = {r['name'] for r in store.rooms_of(made['site'])}
         assert 'Main data centre' in names and 'CPD principal' not in names
         assert store.sites.get(made['site_dr'])['name'] == 'Demo · DR'
-        assert demo.remove(store, var_dir=str(tmp_path)) == 2
+        assert demo.remove(store, var_dir=str(tmp_path)) == 6
         assert not any(_counts(tmp_path).values())
 
 
@@ -569,7 +570,7 @@ class TestBuildingItAgain:
         store, _made, path = built
         with pytest.raises(demo.DemoError):
             demo.build(store, var_dir=str(path))
-        assert _counts(path)['dc_site'] == 2
+        assert _counts(path)['dc_site'] == 6
 
     def test_replace_rebuilds_with_the_same_counts_and_no_stray_files(self, built):
         store, made, path = built
@@ -581,7 +582,7 @@ class TestBuildingItAgain:
 
     def test_remove_leaves_nothing_behind(self, built):
         store, _made, path = built
-        assert demo.remove(store, var_dir=str(path)) == 2
+        assert demo.remove(store, var_dir=str(path)) == 6
         assert not any(_counts(path).values())
         # What stays is the core catalogue's: the drawings of its access-control models.
         quedan = _media(path)
@@ -624,7 +625,7 @@ class TestTheCommand:
         assert '--replace' in capsys.readouterr().err
         assert self._run(d, replace=True) == 0
         assert self._run(d, remove=True) == 0
-        assert 'demo removed (2 sites)' in capsys.readouterr().out
+        assert 'demo removed (6 sites)' in capsys.readouterr().out
         assert self._run(d, remove=True) == 0
         assert 'no demo' in capsys.readouterr().out
 

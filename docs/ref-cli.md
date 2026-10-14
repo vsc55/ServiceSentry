@@ -137,8 +137,9 @@ La sede tiene:
   climatizadores en fila, splits de pared y sin climatización. Los modelos dicen su flujo de aire
   (servidores de delante a detrás, switches de detrás a delante).
 - **Equipos en aviso y en error**: la mayoría de los equipos activos de los CPD y de las salas de
-  comunicaciones salen en verde, unos cuantos en aviso y otros en error; el laboratorio y la sede
-  de respaldo quedan sin vigilar. Es un estado de demostración (`dc_item.demo_state`): la demo no
+  comunicaciones salen en verde, unos cuantos en aviso y otros en error; el laboratorio queda sin
+  vigilar. Las tres sedes pequeñas también tienen estado: casi todo en verde, el cortafuegos
+  FW-DR en error (túnel IPsec caído) y el router RTR-PR en aviso (latencia del SD-WAN). Es un estado de demostración (`dc_item.demo_state`): la demo no
   crea dispositivos ni comprobaciones, así que el monitor no vigila nada y no puede llegar ninguna
   alerta de máquinas que no existen. Cada uno lo dice en su descripción.
 - **Seguridad en el mapa**: todo lo que va en pared —los IQ, extintores, cuadros, BIE, pulsadores,
@@ -163,9 +164,23 @@ La sede tiene:
 - **Energía completa**: acometida → cuadro general → cuadro CPD → SAI A y SAI B (este en
   bypass) → regletas A/B de cada rack → tomas. Hay dos casos que la vista de energía señala: un
   servidor con los dos cables en la rama A y un rack de GPU por encima de la carga segura.
-- **Cableado** dentro de los racks, entre racks, entre plantas por fibra, y dos enlaces WAN
-  (MPLS e IPsec) con una segunda sede pequeña, **Demo · Respaldo**, que existe solo para que los
-  enlaces tengan dónde llegar.
+- **Cableado** dentro de los racks, entre racks y entre plantas por fibra.
+- **Una WAN** con cinco sedes más, cada una con una sala técnica, un rack (router,
+  cortafuegos, switch y dos servidores) y su acometida con SAI: **Demo · Respaldo** (Barcelona),
+  **Demo · Texas** (Dallas), **Demo · Puerto Rico** (San Juan), **Demo · Sudáfrica**
+  (Johannesburgo) y **Demo · Taiwán** (Taipéi). Siete enlaces, cada uno terminado en sus
+  equipos, así que el mapa pinta su estado:
+  - Demo ↔ Respaldo, dos enlaces en alta disponibilidad: el MPLS entre routers, **en verde**, y
+    el túnel IPsec entre cortafuegos, **caído** (FW-DR en error);
+  - Demo ↔ Texas, MPLS internacional entre routers, **en verde**;
+  - Texas ↔ Puerto Rico, SD-WAN sobre internet, **en aviso** (y el cuadro avisa de que Puerto
+    Rico depende de un solo enlace);
+  - Demo ↔ Sudáfrica, MPLS internacional, **caído**: la sede de Sudáfrica está **entera fuera
+    de línea** —todos sus equipos en error, con el motivo— y colgaba de ese único enlace;
+  - Demo ↔ Taiwán, MPLS internacional, y Texas ↔ Taiwán, SD-WAN: dos caminos, los dos **en
+    verde**.
+
+  `--remove` borra las seis sedes con sus enlaces, en el idioma en que se crearan.
 - **Dos empresas**: la operadora de la sede y un cliente que tiene dos racks alquilados.
 - **Modelos propios con foto**: la demo trae sus modelos de catálogo (fabricante «Demo», origen
   `demo`) con sus puertos —cuántos, de qué tipo y dónde está cada uno— y con el frontal y la

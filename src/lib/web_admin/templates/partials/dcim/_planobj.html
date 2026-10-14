@@ -103,15 +103,17 @@ function _dcPlanLeave() {
 
 /** El enlace «3D»: la sede, una planta, una sala o un rack en `/3d`, en otra pestaña. `q`:
  *  `{site, floor, room, rack}` —lo que se sepa—; sin planta se mira el edificio entero, y una
- *  sala o un rack sin planta no tienen sitio en él. `grande`: del tamaño de los botones de la
+ *  sala o un rack sin planta, en la de las salas que no están en ninguna (`_DS3_LOOSE`, que
+ *  el 3D monta). `grande`: del tamaño de los botones de la
  *  barra de un rack. Pedido: un botón en los mapas que abra eso mismo en 3D. Un enlace y no un
  *  botón: «abrir en otra pestaña» es lo que hace un enlace, también con el botón central. */
 function _dc3dLinkHtml(q, grande) {
     const p = new URLSearchParams();
     if (!q || !q.site) return '';
     p.set('site', q.site);
-    if (q.floor) {
-        p.set('floor', q.floor);
+    const planta = q.floor || (q.room || q.rack ? _DS3_LOOSE : '');
+    if (planta) {
+        p.set('floor', planta);
         p.set('mode', 'floor');
         if (q.room) p.set('room', q.room);
         if (q.rack) p.set('rack', q.rack);

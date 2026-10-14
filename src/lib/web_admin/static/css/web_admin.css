@@ -2606,6 +2606,31 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
    :hover — mixing it with the JS state + position:fixed left flyouts lingering/overlapping. */
 .ss-sb-flywrap.ss-fly-open .ss-sb-flyout { display: block; }
 
+/* ── "Customise menu": the reader arranges the sidebar (partials/init/_sidebar.html) ──────
+   The bar sits between the brand and the list, outside the scroll, so Save is always in reach.
+   Every reorderable entry (`li[data-sb-key]`) carries its controls pinned to the right of its
+   OWN row — a group's sit on its header, its entries' on theirs — and the row's text makes room
+   for them instead of running underneath. */
+.ss-sb-editbar { padding: .5rem .75rem; border-bottom: 1px solid rgba(255,255,255,.08);
+    background: rgba(13,110,253,.14); }
+.ss-sb-edithint { font-size: .72rem; line-height: 1.3; margin-bottom: .45rem; white-space: normal; }
+.ss-sb-editbtns { display: flex; flex-wrap: wrap; gap: .3rem; }
+.ss-sb-editbtns .btn { font-size: .72rem; padding: .15rem .45rem; }
+.ss-sb-editing li[data-sb-key] { position: relative; }
+.ss-sb-editing li[data-sb-key] > .ss-sb-item,
+.ss-sb-editing li[data-sb-key] > .ss-sb-flywrap > .ss-sb-item { padding-right: 4.75rem; cursor: grab; }
+.ss-sb-editing li[data-sb-key] > .ss-sb-item .ss-sb-label,
+.ss-sb-editing li[data-sb-key] > .ss-sb-flywrap > .ss-sb-item .ss-sb-label {
+    overflow: hidden; text-overflow: ellipsis; }
+.ss-sb-editing .ss-sb-caret { display: none; }
+.ss-sb-editing .ss-sb-art { display: none; }
+.ss-sb-editctl { position: absolute; top: .2rem; right: .4rem; z-index: 1;
+    display: flex; align-items: center; gap: .15rem; }
+.ss-sb-editctl .ss-sb-mv { padding: 0 .3rem; font-size: .68rem; line-height: 1.35; }
+.ss-sb-grip { color: #94a3b8; cursor: grab; padding: 0 .1rem; font-size: .85rem; }
+.ss-sb-dragging { opacity: .45; }
+.ss-sb-dragging > .ss-sb-item { outline: 1px dashed rgba(255,255,255,.5); }
+
 /* Account settings (/account): the cards of the open section, beside the rail.
    A cap and NOT a centred box — it sits against the left edge and the shell fills the pane.
    Two cards of form fields side by side is what the width is for; past that a password field

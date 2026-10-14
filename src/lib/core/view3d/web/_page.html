@@ -54,7 +54,8 @@ function dcimGoSite(uid) { return _x3OpenSite(uid); }
  *  en el panel, que es donde se trabaja con él. */
 async function _dcimOpenPlan(roomUid) {
     const sala = _x3Room(roomUid);
-    if (_ds3Mode === 'building' && sala && sala.floor_uid) return _x3Go(sala.floor_uid, 'floor');
+    const planta = sala && _x3FloorOf(sala);
+    if (_ds3Mode === 'building' && planta) return _x3Go(planta, 'floor');
     _x3Panel('/dcim?room=' + encodeURIComponent(roomUid));
 }
 
@@ -93,6 +94,7 @@ async function _x3Refresh() {
         const site = _dcimData.sites.find(s => s.uid === _dcsPlan.site.uid);
         if (site) _dcsPlan.site = site;
         await _dcsLoadContents();
+        _x3Loose();
         _x3Stop3d();
         _x3Start3d();
     }
@@ -104,6 +106,28 @@ function _x3Room(uid) {
     for (const s of (_dcimData.sites || []))
         for (const r of (s.rooms || [])) if (String(r.uid) === String(uid)) return r;
     return null;
+}
+
+/** La planta en la que se mira una sala: la suya, o la de las salas sin planta (`_DS3_LOOSE`)
+ *  si no está en ninguna de la sede abierta. `''` si no se mira en ninguna. */
+function _x3FloorOf(sala) {
+    const plantas = (_dcsPlan || {}).floors || [];
+    if (sala.floor_uid && plantas.some(f => f.uid === sala.floor_uid && !f.virtual)) return sala.floor_uid;
+    return plantas.some(f => f.virtual) ? _DS3_LOOSE : '';
+}
+
+/** Las salas sin planta, en su planta de mentira (`_ds3AddLoose`): al abrir la sede y al
+ *  volver a preguntar. Se entra en ella si se pidió o si la sede no tiene otra; y si era la
+ *  que se miraba y ya no hay salas sin planta, a la primera de verdad. */
+function _x3Loose(pedida) {
+    if (!_dcsPlan) return;
+    const hay = _ds3AddLoose();
+    const antes = _dcsPlan.floor;
+    if (hay && (pedida === _DS3_LOOSE || !_dcsPlan.floor)) _dcsPlan.floor = _DS3_LOOSE;
+    else if (!hay && _dcsPlan.floor === _DS3_LOOSE) _dcsPlan.floor = (_dcsPlan.floors[0] || {}).uid || '';
+    // Sin plano de fondo: no es una planta, no tiene. (Al volver a una de verdad, su plano se
+    // pide al cambiar de planta, como siempre.)
+    if (_dcsPlan.floor !== antes && _dcsPlan.floor === _DS3_LOOSE) _dcsPlan.image = null;
 }
 
 function _x3SiteState(uid) {
@@ -125,6 +149,7 @@ async function _x3OpenSite(uid, floorUid, mode, desdeDireccion) {
     await _dcsOpen(uid, floorUid);
     // Otra sede pedida mientras tanto: esa termina lo suyo.
     if (!_dcsPlan || _dcsPlan.site.uid !== uid) return;
+    _x3Loose(floorUid);
     _x3Busy = false;
     _x3Start3d();
     _x3Url(!desdeDireccion);
@@ -466,9 +491,10 @@ async function _x3OpenRack(uid) {
 
 /** E / Q en la escalera: la planta de arriba o la de abajo, en el mismo punto y mirando igual. */
 async function _x3Stairs(paso, donde) {
-    const plantas = _x3Floors();
+    // La de las salas sin planta no está encima de nada: la escalera no lleva a ella ni sale de ella.
+    const plantas = _x3Floors().filter(f => !f.virtual);
     const i = plantas.findIndex(f => f.uid === (_dcsPlan || {}).floor);
-    const otra = plantas[i + paso];
+    const otra = i < 0 ? null : plantas[i + paso];
     if (!otra) return showToast(t(paso > 0 ? 'x3_no_floor_up' : 'x3_no_floor_down'), 'info');
     await _x3Go(otra.uid, 'floor');
     ss3dFpsStart(_DC3D_BOX, donde, document.getElementById(_X3_MAIN));

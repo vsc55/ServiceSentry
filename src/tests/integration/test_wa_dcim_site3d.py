@@ -200,6 +200,21 @@ const camR = {mira: [20, 1, 15], radio: 12, theta: Math.PI / 3, phi: 0.6};
 const vR = {cam: camR, escena: escHondo, cv: lienzo};
 for (let n = 0; n < 60; n++) { vR.ojo = ojoDe(camR); ss3dWheel(vR, rueda(500, 250)); }
 __out.llegaAlSuelo = ojoDe(camR)[1] - (-12) < 1;
+// Un rack visto de frente —algo vertical—, con el ratón sobre un equipo de arriba: la rueda
+// acercaba solo en horizontal y nunca subía al equipo señalado. Ahora el punto bajo el cursor
+// se queda bajo el cursor, y la vista sube hacia él.
+const escRack = {W: 1, D: 1, H: 2.2, cajas: [
+    {color: [0.3, 0.3, 0.3, 1], m: ss3dModel(0, 0, 0, 0.6, 2, 0.6, 0), lee: null}]};
+const camK = {mira: [0.3, 1, 0.3], radio: 3, theta: Math.PI / 2, phi: Math.PI / 2};
+const vK = {cam: camK, escena: escRack, cv: lienzo};
+vK.ojo = ojoDe(camK);
+const ratonArriba = {clientX: 500, clientY: 120, deltaY: -1, preventDefault() {}};
+const pK = _ss3dCursorPoint(vK, ratonArriba);
+ss3dWheel(vK, ratonArriba);
+vK.ojo = ojoDe(camK);
+const pK2 = _ss3dCursorPoint(vK, ratonArriba);
+__out.rackSube = [pK[1] > 1.05, camK.mira[1] > 1 + 1e-6,
+                  Math.hypot(pK2[0] - pK[0], pK2[1] - pK[1], pK2[2] - pK[2]) < 1e-3];
 
 // ── Los rótulos ─────────────────────────────────────────────────────────────────
 const salaR = _dc3dRoomBoxes({width_mm: 6000, depth_mm: 5000},
@@ -354,6 +369,13 @@ class TestLaRuedaAcercaHaciaElCursor:
 
     def test_alejando_al_tope_no_anda(self, out):
         assert out['topeQuieto']
+
+    def test_on_an_upright_rack_it_zooms_up_to_the_unit_pointed_at(self, out):
+        """Reported: in the rack's 3D the wheel did not zoom toward the pointer — it moved
+        only across, on the ground at the height of the point looked at, never up or down."""
+        alto, subio, quieto = out['rackSube']
+        assert alto and subio, 'the view did not go up toward the unit under the pointer'
+        assert quieto, 'the point under the pointer moved on screen'
 
     def test_with_the_floors_apart_the_wheel_reaches_the_floor_under_the_pointer(self, out):
         """Reported: with the floors apart and the basement chosen, the wheel stopped zooming

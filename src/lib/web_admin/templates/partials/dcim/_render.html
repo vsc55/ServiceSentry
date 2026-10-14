@@ -400,7 +400,7 @@ function _dcimGo(donde) {
     if (donde === 'wiring') return _dcWireOpen();
     if (donde === 'devices') return _dcDevOpen();
     if (donde === 'sources') return _dcSrcOpen();
-    if (donde === 'board') return _dcimOpenBoard();
+    if (donde === 'board') { _dcPlanLeave(); _dcimRack = _dcimPlan = _dcsPlan = null; return _dcimOpenBoard(); }
     // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al
     // rack, que es donde ya se estaba. Con lo que se estaba mirando elegido.
     _dcimRemember();

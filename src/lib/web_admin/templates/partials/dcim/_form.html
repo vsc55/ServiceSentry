@@ -105,14 +105,17 @@ const _DCIM_KIND = {
         {name: 'role', zone: 'what', tt: 'dcim_role_tt', label: 'dcim_role',
          choices: ['', 'server', 'switch', 'router', 'firewall', 'storage', 'patch_panel',
                    'fiber_panel', 'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank', 'other'],
-         prefix: 'dcim_role_', w: '11rem'},
+         prefix: 'dcim_role_', w: '11rem', drives: true},
         // **Cómo está puesto**, antes que los U: es lo que decide si los U significan algo.
         // Casi todo se atornilla a los mástiles; lo que no —un SAI en el suelo al lado, un
         // cuadro en la pared, una regleta atornillada al lateral— está en el armario para todo
         // lo demás y no tiene U.
         {name: 'placement', zone: 'where', label: 'dcim_item_place', tt: 'dcim_item_place_tt',
          choices: ['u', 'side', 'near'], prefix: 'dcim_place_', value: 'u', w: '15rem',
-         drives: true},
+         drives: true,
+         // Una regleta se dice como se compra: horizontal (ocupa su U, delante o detrás) o
+         // vertical (0U, en un canal trasero). Son las mismas dos colocaciones con su nombre.
+         prefixOf: r => String((r || {}).role || '') === 'pdu' ? 'dcim_place_pdu_' : ''},
         // El U y el alto: sólo de lo que se atornilla a los mástiles y no va montado sobre
         // otra cosa. Lo montado hereda el sitio del que lo lleva, y lo que no ocupa U no tiene
         // ninguno del que hablar.
@@ -147,6 +150,14 @@ const _DCIM_KIND = {
         // asoma por ninguna, y lo montado sobre una bandeja asoma por la de la bandeja.
         {name: 'face', zone: 'where', tt: 'dcim_face_tt', label: 'dcim_face', choices: ['full', 'front', 'rear'],
          prefix: 'dcim_face_', w: '8rem', when: _dcimTakesU},
+        // Lo de 0U —una regleta vertical—: en qué canal trasero va, mirando por detrás, y si
+        // comparte lado con otra, cuál es la de fuera. Vacío = automático, lo de siempre.
+        {name: 'side_pos', zone: 'where', tt: 'dcim_side_pos_tt', label: 'dcim_side_pos',
+         choices: ['', 'rear-left', 'rear-right'], prefix: 'dcim_side_pos_', w: '11rem',
+         when: _dcimOnSide},
+        {name: 'side_slot', zone: 'where', tt: 'dcim_side_slot_tt', label: 'dcim_side_slot',
+         type: 'number', choices: ['0', '1'], prefix: 'dcim_side_slot_', value: 0, w: '9rem',
+         when: _dcimOnSide},
         // Su fondo, que el catálogo no sabe: devicetype-library dice si un modelo es de
         // profundidad completa y nunca cuántos milímetros. Sin él el rack sigue diciendo lo que
         // TIENE, que es lo que quiere saber quien está delante con una caja en la mano.
@@ -211,6 +222,11 @@ const _DCIM_DRIVE = 'onchange="_dcimFormSnap();_dcimFormDraw()"';
  *  sobre otra cosa. Lo montado hereda el sitio del que lo lleva. */
 function _dcimTakesU(row) {
     return String((row || {}).placement || 'u') === 'u' && !(row || {}).parent_uid;
+}
+
+/** Si va de 0U dentro del armario (una regleta vertical): entonces se dice su canal. */
+function _dcimOnSide(row) {
+    return String((row || {}).placement || 'u') === 'side' && !(row || {}).parent_uid;
 }
 
 /** Si tiene un hueco que se pueda partir: el suyo si ocupa U, o el de la bandeja que lo lleva. */
@@ -366,7 +382,9 @@ function _dcimFormBody() {
         .map(_dcimDatalist).join('');
     const zonas = _DCIM_ZONES[f.kind];
     // Un equipo en aviso o caído dice por qué, arriba: es lo primero que se busca al pulsarlo.
-    const porque = f.kind === 'item' ? _dcimWhyHtml(row, 'dcim-form-why') : '';
+    // Y si ES una regleta declarada, cuál y el botón a su ficha (`_dcPduItemBlock`).
+    const porque = f.kind === 'item'
+        ? _dcimWhyHtml(row, 'dcim-form-why') + _dcPduItemBlock(f.uid) : '';
     // Sin zonas declaradas, como siempre: una sede tiene cuatro casillas y partirlas en grupos
     // sería poner cinco rótulos para ordenar cuatro cosas.
     if (!zonas) return `${porque}${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
@@ -388,7 +406,7 @@ function _dcimFieldHtml(fld, i, val, kind, row) {
                     fld.drives ? _DCIM_DRIVE : ''}>
             ${fld.choices.map(c => `<option value="${escAttr(c)}"${
                 String(val) === String(c) ? ' selected' : ''}>${
-                esc(t((fld.prefix || '') + c))}</option>`).join('')}
+                esc(t(((fld.prefixOf && fld.prefixOf(row)) || fld.prefix || '') + c))}</option>`).join('')}
         </select>`;
     // Una lista CERRADA se elige de un desplegable: lo que se ve es el nombre y lo que se guarda
     // es el uid. Una ABIERTA —las zonas horarias— sigue siendo texto con sugerencias, que es lo
@@ -845,6 +863,22 @@ function _dcimClose() {
     hideInfoModal();
     renderDcim();
 }
+
+/** Closing the dialog by its own means —the X, «Cerrar», Esc, a click on the backdrop— is
+ *  closing the form too. Only `_dcimClose` and a save forgot it, so `_dcimForm` outlived the
+ *  dialog and `_dcimOpen`, which toggles, took the next click on the same thing for «close it»:
+ *  the first click did nothing and the second opened. Hooked on the document once, because
+ *  Bootstrap's events bubble and `#infoModal` may not exist yet when this script runs. */
+function _dcimFormHidden(ev) {
+    if (ev && ev.target && ev.target.id === 'infoModal') _dcimForm = null;
+}
+
+function _dcimFormHook() {
+    if (window._dcimFormHideHooked) return;
+    window._dcimFormHideHooked = true;
+    document.addEventListener('hidden.bs.modal', _dcimFormHidden);
+}
+_dcimFormHook();
 
 /** Las dos coordenadas de un pegado, o `null` si eso no es un par.
 

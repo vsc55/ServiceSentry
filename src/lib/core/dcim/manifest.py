@@ -84,8 +84,10 @@ CONFIG_ACTIONS = [
     {'section': 'maintenance', 'id': 'dcim_demo_remove',
      'label_key': 'dcim_demo_remove', 'tooltip_key': 'dcim_demo_remove_tt',
      'desc_key': 'dcim_demo_remove_desc',
-     'icon': 'bi-building-dash', 'variant': 'danger', 'order': 55,
-     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe',
+     # Beside «Install», in the demo's own group: among the eight wipes of «Data deletion» it
+     # could not be found (reported: «I don't see the option to delete the demo data»).
+     'icon': 'bi-building-dash', 'variant': 'danger', 'order': 41,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_demo',
      'perm': 'db_maintenance', 'fn': '_dcimDemoRemove'},
 ]
 

@@ -40,7 +40,7 @@ from lib.core.dcim import rackrev as dcim_rackrev
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim import store as dcim_store
 from lib.core.dcim.store import (FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLACEMENTS,
-                                 clean_place)
+                                 SIDE_POSITIONS, SIDE_SLOTS, clean_place)
 from lib.core.dcim.store.items import _ITEM
 from lib.core.dcim.store.parts import _PART
 from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, numbers_bad,
@@ -53,8 +53,12 @@ def _numbers_bad(spec, data: dict) -> str:
 
     Stored unchecked, ``depth_mm: "abc"`` turned every view of the rack into a 500 —the depth
     check does ``int()`` on it— until somebody fixed the row by hand."""
-    return numbers_bad(spec, data, {c.name: (0, _NUM_MAX) for c in spec.columns
-                                    if c.name.endswith('_mm') or c.name in ('qty', 'kit_qty')})
+    bounds = {c.name: (0, _NUM_MAX) for c in spec.columns
+              if c.name.endswith('_mm') or c.name in ('qty', 'kit_qty')}
+    # The order of a vertical strip in its channel: outside or inside, nothing else.
+    if any(c.name == 'side_slot' for c in spec.columns):
+        bounds['side_slot'] = (min(SIDE_SLOTS), max(SIDE_SLOTS))
+    return numbers_bad(spec, data, bounds)
 
 
 def register(app, wa, C):
@@ -635,6 +639,11 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('dcim_bad_number'), 'field': malo}), 400
         if str(data.get('role') or '') and str(data['role']) not in ITEM_ROLES:
             return jsonify({'error': wa._t('dcim_role_unknown')}), 400
+        # El canal de una regleta vertical: una palabra de las tres (su orden, un 0 o un 1, lo
+        # acota `_numbers_bad`). Guardado a ciegas, «arriba» era una regleta que ningún dibujo
+        # sabe colocar.
+        if 'side_pos' in data and str(data.get('side_pos') or '') not in SIDE_POSITIONS:
+            return jsonify({'error': wa._t('dcim_side_pos_unknown'), 'field': 'side_pos'}), 400
         return None
 
     def _room_item_said(data) -> bool:
@@ -701,6 +710,12 @@ def register(app, wa, C):
             return '', 'dcim_bad_face'
         if str(data.get('role') or '') and str(data['role']) not in ITEM_ROLES:
             return '', 'dcim_role_unknown'
+        if puesto != 'side':
+            # El canal trasero es de lo que va de 0U en el armario: atornillado a los mástiles o
+            # en el suelo al lado no tiene canal, y uno que se queda escrito al cambiar de sitio
+            # volvería el día que el equipo vuelva al lateral, sin que nadie lo haya dicho.
+            data['side_pos'] = ''
+            data['side_slot'] = 0
         if puesto != 'u':
             # **Y sin U guardada.** La ficha ya no la pregunta, pero un equipo que se mueve de
             # los mástiles al suelo conserva la que tenía, y una lista que lee `u_start` la
@@ -1132,7 +1147,8 @@ def register(app, wa, C):
         # ocupar una U, y sin contarlo entre lo que mueve, la comprobación no corría y el equipo
         # se quedaba con la U que tenía — un SAI al lado del armario listado en la U 1.
         moving = {'rack_uid', 'u_start', 'u_height', 'face', 'u_slots', 'u_slot',
-                  'u_slot_span', 'u_split', 'parent_uid', 'placement'} & set(data)
+                  'u_slot_span', 'u_split', 'parent_uid', 'placement',
+                  'side_pos', 'side_slot'} & set(data)
         if moving:
             # Lo que lleva algo encima no puede pasar a ir montado: sería una bandeja sobre una
             # bandeja, y lo que hay encima de ella se quedaría colgando de un nivel que no
@@ -1156,7 +1172,7 @@ def register(app, wa, C):
                     and not C.may_write(store, said, allowed, 'item', padre):
                 return jsonify({'error': wa._t('access_denied')}), 403
             # Colgarlo o descolgarlo arrastra su sitio, que `_place` ya ha resuelto.
-            for campo in ('rack_uid', 'u_start', 'u_height', 'face'):
+            for campo in ('rack_uid', 'u_start', 'u_height', 'face', 'side_pos', 'side_slot'):
                 if campo in merged:
                     data[campo] = merged[campo]
         err = C.asset('items', data, uid)

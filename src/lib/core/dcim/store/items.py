@@ -87,6 +87,16 @@ def room_item_box(item: dict, defaults: dict | None = None) -> dict:
 #: atornilló a los mástiles, que es lo que de verdad hizo.
 PLACEMENTS = ('u', 'side', 'near', 'room')
 
+#: **Dónde va algo de 0U dentro del armario** (`placement = 'side'`): en el canal trasero de la
+#: izquierda o en el de la derecha, **mirando el armario por detrás**, que es desde donde se
+#: monta y se enchufa una regleta vertical. Vacío = automático, lo de siempre: la primera a la
+#: izquierda, la segunda a la derecha y así alternando — lo escrito antes de esta columna se
+#: dibuja exactamente igual.
+SIDE_POSITIONS = ('', 'rear-left', 'rear-right')
+#: Y en qué orden dentro de su canal, cuando hay dos en el mismo lado: 0 = la de fuera (pegada
+#: al lateral), 1 = la de dentro (junto al mástil).
+SIDE_SLOTS = (0, 1)
+
 _ITEM = TableSpec(
     name='dc_item',
     columns=(
@@ -195,6 +205,12 @@ _ITEM = TableSpec(
         # Una toma de corriente: la fuente de su sede de la que cuelga (`dc_source`: un SAI, un
         # grupo, un cuadro). Con ella hereda la cadena entera: si va protegida o no.
         Column('source_uid', 'TEXT', nullable=False, default="''"),
+        # Lo de 0U (`placement = 'side'`, una regleta vertical): en qué canal trasero va
+        # (`SIDE_POSITIONS`, vacío = automático, alternando como siempre) y, si comparte lado
+        # con otra, cuál es la de fuera (0) y cuál la de dentro (1). Una regleta horizontal no lo
+        # necesita: ocupa su U y su cara como cualquier equipo.
+        Column('side_pos', 'TEXT', nullable=False, default="''"),
+        Column('side_slot', 'INTEGER', nullable=False, default='0'),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

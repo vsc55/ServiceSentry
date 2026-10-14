@@ -156,6 +156,7 @@ def register(app, wa):
             'table_config': user_data.get('table_config', {}),
             'dashboard_layout': user_data.get('dashboard_layout', []),
             'modal_config': user_data.get('modal_config', {}),
+            'sidebar_order': user_data.get('sidebar_order') or None,
             'login_id': session.get('session_id', ''),
             'restart_pending': wa._restart_pending,
             'startup_id':      wa._startup_id,

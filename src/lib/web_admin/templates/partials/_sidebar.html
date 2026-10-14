@@ -62,6 +62,21 @@
         </button>
     </div>
 
+    {# The bar of the "Customise menu" mode (partials/init/_sidebar.html): hidden until the
+       mode is entered, and OUTSIDE the scrolling list so its buttons stay in view while the
+       list scrolls under it. #}
+    <div class="ss-sb-editbar" id="ss-sb-editbar" hidden>
+        <div class="ss-sb-edithint">{{ i18n.sb_order_hint }}</div>
+        <div class="ss-sb-editbtns">
+            <button type="button" class="btn btn-primary btn-sm" id="ss-sb-order-save"
+                    onclick="_sbOrderSave()"><i class="bi bi-check-lg me-1"></i>{{ i18n.sb_order_save }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="ss-sb-order-cancel"
+                    onclick="_sbOrderCancel()">{{ i18n.sb_order_cancel }}</button>
+            <button type="button" class="btn btn-warning btn-sm" id="ss-sb-order-reset"
+                    onclick="_sbOrderReset()"><i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.sb_order_reset }}</button>
+        </div>
+    </div>
+
     <!-- Navigation -->
     <nav class="ss-sb-nav">
         {# `nav flex-column` so the section items are Bootstrap Tabs too (they map to the
@@ -80,7 +95,7 @@
                ships hidden like every other and syncModuleSections() decides. Core pages
                carry no module and are governed by the permission alone. #}
             <li class="nav-item{% if p.views %} ss-sb-has-sub{% endif %}"
-                id="nav-page-{{ p.id }}-li" data-nav-perm="{{ p.perm }}"
+                id="nav-page-{{ p.id }}-li" data-nav-perm="{{ p.perm }}" data-sb-key="p:{{ p.id }}"
                 {% if p.module %}data-nav-module="{{ p.module }}"{% endif %}
                 style="display:none" role="presentation">
                 {% if p.views %}
@@ -143,14 +158,19 @@
                loading overlay at boot, and it stays hidden for a user who can open none. Its
                open/closed state is remembered under its own key (`data-sb-store`). #}
             {% for grp in [
-                {'gid': 'ss-sb-catalog-group', 'cid': 'ss-sb-catalog', 'icon': 'bi-collection',
+                {'gid': 'ss-sb-catalog-group', 'cid': 'ss-sb-catalog', 'icon': 'bi-collection', 'key': 'catalog',
                  'label': i18n.nav_catalog or 'Catalogue', 'tabs': catalog_tabs or [],
                  'store': 'ss_sidebar_catalog_open'},
-                {'gid': 'ss-sb-settings-group', 'cid': 'ss-sb-settings', 'icon': 'bi-sliders',
+                {'gid': 'ss-sb-settings-group', 'cid': 'ss-sb-settings', 'icon': 'bi-sliders', 'key': 'system',
                  'label': i18n.admin_panel or 'System', 'tabs': panel_tabs or [],
                  'store': 'ss_sidebar_settings_open'},
             ] if grp.tabs %}
-            <li class="ss-sb-group" id="{{ grp.gid }}" style="display:none">
+            {# `data-sb-key` on every entry the reader may reorder (the "Customise menu" mode,
+               partials/init/_sidebar.html): a STABLE id — `p:` a first-level section, `g:` a
+               group, `t:` an entry inside a group — never the label, which is translated and
+               sorted per language. The group's list names its group (`data-sb-group`), which
+               is where the order of its entries is kept. #}
+            <li class="ss-sb-group" id="{{ grp.gid }}" style="display:none" data-sb-key="g:{{ grp.key }}">
                 {% if standalone %}
                 <a class="ss-sb-item ss-sb-parent" href="/admin" data-nav-section
                    title="{{ grp.label }}">
@@ -172,7 +192,7 @@
                    via .closest('.nav, .list-group'); without it Tab.show() finds no parent
                    and the panel tabs never activate. flex-column keeps the list vertical. #}
                 <ul class="collapse ss-sb-sub nav flex-column{% if not standalone %} show{% endif %}"
-                    id="{{ grp.cid }}" data-sb-store="{{ grp.store }}" role="tablist">
+                    id="{{ grp.cid }}" data-sb-store="{{ grp.store }}" data-sb-group="{{ grp.key }}" role="tablist">
                     {% for t in grp.tabs %}
                     {# data-nav-module on a module's tab: it is offered only while its module
                        is configured and on, and that changes while the panel is open, so
@@ -185,7 +205,7 @@
                        attribute, so nothing ever revealed it and it shipped hidden. The
                        panel's own tabs (no `url`) stay governed by id, as before. #}
                     <li class="nav-item{% if not standalone and (t.id in subtabs or t.views) %} ss-sb-has-sub{% endif %}"
-                        id="tab-{{ t.id }}-li" style="display:none" role="presentation"
+                        id="tab-{{ t.id }}-li" style="display:none" role="presentation" data-sb-key="t:{{ t.id }}"
                         {% if t.module %}data-nav-module="{{ t.module }}"{% endif %}
                         {% if t.url %}data-nav-perm="{{ t.perm }}"{% endif %}>
                         {% if standalone %}
@@ -322,6 +342,13 @@
                     <i class="bi bi-gear me-2"></i>{{ i18n.my_settings }}
                 </button>
                 {% endif %}
+            </li>
+            <li>
+                {# Reordering the menu is a preference of the reader's own, like the theme
+                   beside it — so it lives in this menu, which is in the sidebar it changes. #}
+                <button class="dropdown-item" type="button" id="ss-sb-order-open" onclick="_sbOrderEdit()">
+                    <i class="bi bi-arrow-down-up me-2"></i>{{ i18n.sb_order_customize }}
+                </button>
             </li>
             <li>
                 <a class="dropdown-item" href="#" onclick="_toggleTheme(); return false;">

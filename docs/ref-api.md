@@ -246,7 +246,7 @@ El nombre en sí es el campo de configuración `brand|name` y se guarda con `PUT
 | PUT | `/api/v1/users/<username>` | `users_edit` | Actualizar (rol/nombre/contraseña/grupos) |
 | DELETE | `/api/v1/users/<username>` | `users_delete` | Borrar usuario |
 | POST | `/api/v1/users/<username>/unlock` | `users_edit` | Levantar el **bloqueo por intentos fallidos**. Responde `{ok, cleared}`: `cleared` es si había uno **en vigor** —una cuenta que no estaba bloqueada no es un error, el que llama pidió que no lo estuviera y no lo está—. No concede acceso: la contraseña sigue teniendo que ser correcta, por eso va con `users_edit` y no con un permiso propio. Ver [explica-seguridad.md](explica-seguridad.md#bloqueo-de-cuenta-por-intentos-fallidos) |
-| PUT | `/api/v1/users/me/preferences` | sesión | Preferencias propias (lang/dark/landing/table_config/layout) |
+| PUT | `/api/v1/users/me/preferences` | sesión | Preferencias propias (lang/dark/landing/table_config/layout/sidebar_order) |
 | PUT | `/api/v1/users/me/password` | sesión | Cambiar contraseña propia (requiere `current_password`) |
 
 Cada registro lleva `last_login`: cuándo inició sesión esa cuenta por última vez, o cadena

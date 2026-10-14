@@ -187,6 +187,26 @@ def register(app, wa, C):
                 return wa._t('dcim_outlet_taken')
         return ''
 
+    def _outlets_short(store, pdu_uid, outlets):
+        """Why a strip may NOT be left with *outlets* outlets, or `''` if it may.
+
+        Fewer than are in use is a strip with cables plugged into outlets it no longer has —
+        the same impossible fact `_outlet_bad` refuses one cable at a time, written the other
+        way round. Counted both ways: the highest numbered outlet in use, and how many leads
+        hang off it (a lead in «not sure which» still takes an outlet). **0 passes**: it is
+        «nobody said how many», and no number falls outside a count that does not exist.
+        """
+        n = int(_num(outlets))
+        if n <= 0:
+            return ''
+        cables = store.feeds_of([str(pdu_uid or '')])
+        alta = max([int(_num(c.get('outlet'))) for c in cables] or [0])
+        if n >= max(alta, len(cables)):
+            return ''
+        if alta > n:
+            return wa._t('dcim_pdu_outlets_in_use').format(len(cables), alta, n)
+        return wa._t('dcim_pdu_outlets_in_use_n').format(len(cables), n)
+
     @app.route('/api/v1/dcim/sources', methods=['GET'])
     @C.view_req
     def api_dcim_sources():
@@ -797,6 +817,10 @@ def register(app, wa, C):
                 return _bad_number(wa, malo)
             if 'feed' in data and str(data['feed']) not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
+            if kind == 'pdus' and 'outlets' in data:
+                malo = _outlets_short(store, uid, data.get('outlets'))
+                if malo:
+                    return jsonify({'error': malo}), 400
             if kind == 'pdus' and 'source_uid' in data:
                 malo = _source_for_rack_bad(store, row.get('rack_uid'), data.get('source_uid'))
                 if malo:

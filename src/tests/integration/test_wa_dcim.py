@@ -6001,11 +6001,12 @@ class TestLoQueHayEnLaSedeDeUnaVez:
         assert [f['kind'] for f in sala['features']] == ['door']
         assert 'door' in d['kinds']
 
-    def test_una_sala_sin_planta_no_viene(self, client, fleet):
-        """Lo que no está en ninguna planta no se dibuja en ninguna."""
+    def test_una_sala_sin_planta_tambien_viene(self, client, fleet):
+        """Una sala que no está en ninguna planta se mira en 3D en la de «Salas sin planta»:
+        sin sus racks aquí, una sede solo con salas así no dibujaba nada."""
         _login(client)
         d = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/contents').get_json()
-        assert d['rooms'] == {}
+        assert [r['name'] for r in d['rooms'][fleet['room']]['racks']] == ['R3']
 
     def test_dice_lo_mismo_que_la_lista_de_racks_de_cada_sala(self, admin, client, fleet):
         """El mismo filtro que `/racks?room=`: quien solo ve su parte no ve aquí más."""

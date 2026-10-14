@@ -447,12 +447,13 @@ class TestTheFloatingBarAndThePalette:
 
     def test_the_3d_link_opens_that_place_in_another_tab(self, out):
         """Asked for: a button on the maps that opens the room, the floor or the rack in 3D in
-        another tab. Without a floor only the building, where a room has no place."""
+        another tab. A room or a rack on no floor goes to the 3D's floor of loose rooms."""
         e = out['enlace3d']
         assert 'href="/3d?site=s1&amp;floor=f1&amp;mode=floor&amp;room=r1"' in e['sala']
         assert 'target="_blank"' in e['sala'] and 'rel="noopener"' in e['sala']
         assert 'rack=k1' in e['rack'] and 'btn-sm' not in e['rack']
-        assert 'href="/3d?site=s1"' in e['sinPlanta'] and e['sinSede'] == ''
+        assert ('href="/3d?site=s1&amp;floor=_loose&amp;mode=floor&amp;room=r1"' in e['sinPlanta']
+                and e['sinSede'] == '')
         src = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
         dcim = os.path.join(src, 'lib', 'web_admin', 'templates', 'partials', 'dcim')
         for f in ('_plan.html', '_siteplan.html', '_rack.html'):

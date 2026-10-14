@@ -21,7 +21,7 @@
 
 const _DCM_SVG = 'dcim-sitemap';
 //: Cuánto ocupa una sede en el dibujo SIN mapa, y cuánto separa dos.
-const _DCM = {W: 190, H: 76, PAD: 60};
+const _DCM = {W: 210, H: 76, PAD: 60};
 
 //: Cuánto pesa cada estado al decidir qué caja se dibuja encima de cuál. El MISMO orden con el
 //: que el servidor ordena la lista de lo que falla (`service._RANK`): dos ideas de «peor» en la
@@ -140,11 +140,16 @@ function _dcmExtent(sites, ratio) {
     let minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad;
     let maxX = Math.max(...xs) + w + pad, maxY = Math.max(...ys) + h + pad;
     if (conMapa) {
+        // Ajustado a donde HAY sedes. Era un cuadrado con un 40 % de margen, que estirado a la
+        // forma del hueco abría el mundo entero aunque las sedes ocuparan medio. Ahora cada eje
+        // lleva su margen, justo, y arriba algo más: las tarjetas cuelgan POR ENCIMA de la
+        // chincheta y la de la sede más al norte se salía del encuadre.
         const min = _DCM_WORLD / 64;                 // ~medio continente: un encuadre que ubica
         const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-        const size = Math.max(min, maxX - minX, maxY - minY) * 1.4;
-        minX = cx - size / 2; minY = cy - size / 2;
-        maxX = cx + size / 2; maxY = cy + size / 2;
+        const sx = Math.max(min, maxX - minX) * 1.15;
+        const sy = Math.max(min * forma, maxY - minY) * 1.25;
+        minX = cx - sx / 2; maxX = cx + sx / 2;
+        minY = cy - sy / 2 - sy * 0.15; maxY = cy + sy / 2;
     }
     // Y a la forma del hueco, ESTIRANDO y nunca encogiendo: encoger sacaría fuera lo que ya
     // cabía, que es esconder una sede.
@@ -171,11 +176,13 @@ function _dcimMapHtml(sites) {
              onpointerleave="_dcmUp(event)"
              aria-label="${escAttr(t('dcim_map'))}">
             <g id="${escAttr(_DCM_SVG)}-tiles"></g>
-            <g id="${escAttr(_DCM_SVG)}-links">${_dcmLinks(sites)}</g>
+            <g id="${escAttr(_DCM_SVG)}-links">${_dcmLinks(sites, 'lines')}</g>
             <g id="${escAttr(_DCM_SVG)}-pins">${
                 (() => { const con = _dcmLabels(sites);
                          return _dcmOrder(sites)
                                 .map(([s, i]) => _dcmSite(s, i, !!con[s.uid])).join(''); })()}</g>
+            <g id="${escAttr(_DCM_SVG)}-linklabels" style="pointer-events:none">${
+                _dcmLinks(sites, 'labels')}</g>
         </svg>
         ${cred ? `<div class="ss-map-credit">${esc(cred)}</div>` : ''}
         ${fallo ? `<div class="ss-map-credit" style="right:auto;left:.25rem">
@@ -214,30 +221,109 @@ function _dcmDrawTiles(view) {
  *  Una sede con **una sola línea** no lleva ningún adorno especial aquí: se ve perfectamente,
  *  porque una línea es una línea. El aviso está escrito con palabras en el cuadro, que es donde
  *  se lee; ponerlo también en el dibujo sería decir dos veces lo mismo y tapar el mapa. */
-function _dcmLinks(sites) {
+//: El enlace bajo el ratón: su rótulo se enseña aunque esté bien.
+let _dcmHotLink = '';
+
+/** Señalar un enlace al pasar por él: solo se repinta la capa de rótulos, que es lo único que
+ *  cambia. */
+function _dcmLinkHot(uid) {
+    if (_dcmHotLink === uid) return;
+    _dcmHotLink = uid;
+    const rotulos = document.getElementById(_DCM_SVG + '-linklabels');
+    if (rotulos) rotulos.innerHTML = _dcmLinks(_dcmData().sites || [], 'labels');
+}
+
+function _dcmLinks(sites, parte) {
     const enlaces = _dcmData().links || [];
     if (!enlaces.length) return '';
     const donde = {};
     sites.forEach((s, i) => { donde[s.uid] = _dcmAt(s, i); });
     const k = _dcmScale();
     const w = _DCM.W * k, h = _DCM.H * k;
+    const mapa = !!_dcmTileUrl();
+    // Del CENTRO de cada caja: una línea que sale de la esquina parece apuntar a otro sitio
+    // en cuanto se mueve una de las dos.
+    const c = (p) => mapa ? p : {x: p.x + w / 2, y: p.y + h / 2};
+    // Los enlaces de una misma pareja de sedes —dos para alta disponibilidad, lo normal— iban
+    // por la MISMA recta: se veía uno, y sus rótulos se escribían uno encima del otro. Se
+    // reparten en arcos simétricos alrededor de la recta, y cada rótulo va en el vértice de su
+    // arco. La pareja se ordena para que A→B y B→A curven hacia el mismo lado.
+    const pareja = (l) => [String(l.a_site), String(l.b_site)].sort().join('|');
+    const cuantos = {}, visto = {};
+    enlaces.forEach(l => { cuantos[pareja(l)] = (cuantos[pareja(l)] || 0) + 1; });
+    const hueco = 30 * k;
+    // Dónde hay tarjetas, para que los rótulos no se escriban encima de ellas.
+    const conTarjeta = mapa ? _dcmLabels(sites) : null;
+    const tarjetas = sites.map((s, i) => [s, i])
+        .filter(([s]) => !conTarjeta || conTarjeta[s.uid])
+        .map(([s, i]) => { const p = donde[s.uid];
+            return mapa ? {x: p.x - w / 2, y: p.y - h - 6 * k, w, h} : {x: p.x, y: p.y, w, h}; });
     return enlaces.map(l => {
         const a = donde[l.a_site], b = donde[l.b_site];
         if (!a || !b) return '';
-        // Del CENTRO de cada caja: una línea que sale de la esquina parece apuntar a otro sitio
-        // en cuanto se mueve una de las dos.
-        const mapa = !!_dcmTileUrl();
-        const c = (p) => mapa ? p : {x: p.x + w / 2, y: p.y + h / 2};
-        const p1 = c(a), p2 = c(b);
+        const clave = pareja(l);
+        const n = cuantos[clave], idx = (visto[clave] = (visto[clave] || 0) + 1) - 1;
+        const [pa, pb] = String(l.a_site) < String(l.b_site) ? [c(a), c(b)] : [c(b), c(a)];
+        const dx = pb.x - pa.x, dy = pb.y - pa.y, largo = Math.hypot(dx, dy) || 1;
+        const nx = -dy / largo, ny = dx / largo;
+        const o = (idx - (n - 1) / 2) * hueco;            // 0 con un solo enlace: recta
+        const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+        const vx = mx + nx * o, vy = my + ny * o;           // el vértice del arco
+        const d = `M ${pa.x} ${pa.y} Q ${mx + nx * 2 * o} ${my + ny * 2 * o} ${pb.x} ${pb.y}`;
         const tono = {error: 'danger', warning: 'warning', ok: 'success'}[l.state] || 'secondary';
         const punteada = l.kind === 'ipsec' || l.kind === 'sdwan' || l.kind === 'internet';
-        return `<g><line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"
-                    stroke="var(--bs-${tono})" stroke-width="${2.5 * k}"
-                    ${punteada ? `stroke-dasharray="${8 * k} ${5 * k}"` : ''}
-                    opacity=".85"></line>
-            ${l.label ? `<text x="${(p1.x + p2.x) / 2}" y="${(p1.y + p2.y) / 2 - 4 * k}"
-                text-anchor="middle" font-size="${11 * k}"
-                fill="var(--bs-secondary-color)">${esc(l.label)}</text>` : ''}
+        // Sobre el satélite una línea fina de color se perdía entre campos y carreteras, y su
+        // rótulo en gris secundario no se leía: la línea va sobre un halo del color del fondo,
+        // más gruesa y opaca, y el rótulo con contorno, como los nombres del plano.
+        const raya = punteada ? `stroke-dasharray="${8 * k} ${5 * k}"` : '';
+        // El rótulo, hacia fuera de su arco (a lo largo de la normal); el de la recta, encima.
+        // Y donde no pise una tarjeta: en el centro tapaba el «Caído · 4/7» de la sede de al
+        // lado. Se prueba a lo largo del arco del centro hacia fuera; si ningún punto queda
+        // libre, solo se enseña cuando el ratón está en el enlace.
+        const fuera = Math.sign(o);
+        const cx2 = mx + nx * 2 * o, cy2 = my + ny * 2 * o;
+        const ancho = String(l.label || '').length * 12.5 * k * 0.56, alto = 15 * k;
+        let lx = null, ly = null;
+        for (const tt of [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78]) {
+            const u = 1 - tt;
+            const px = u * u * pa.x + 2 * u * tt * cx2 + tt * tt * pb.x;
+            const py = u * u * pa.y + 2 * u * tt * cy2 + tt * tt * pb.y;
+            const qx = px + nx * fuera * 12 * k;
+            const qy = o === 0 ? py - 7 * k : py + ny * fuera * 12 * k + 4 * k;
+            const caja = {x: qx - ancho / 2, y: qy - alto + 3 * k, w: ancho, h: alto};
+            if (!tarjetas.some(r => caja.x < r.x + r.w && caja.x + caja.w > r.x
+                                    && caja.y < r.y + r.h && caja.y + caja.h > r.y)) {
+                lx = qx; ly = qy;
+                break;
+            }
+        }
+        if (lx === null && l.uid === _dcmHotLink) {      // pedido con el ratón: se enseña igual
+            lx = vx + nx * fuera * 12 * k;
+            ly = o === 0 ? vy - 7 * k : vy + ny * fuera * 12 * k + 4 * k;
+        }
+        const rotulo = l.label && lx !== null ? `<text x="${lx}" y="${ly}"
+                text-anchor="middle" font-size="${12.5 * k}" font-weight="600"
+                fill="var(--bs-body-color)" stroke="var(--bs-body-bg)" stroke-width="${3.5 * k}"
+                stroke-linejoin="round" paint-order="stroke">${esc(l.label)}</text>` : '';
+        // Los rótulos van en su propia capa, ENCIMA de las cajas de las sedes (`parte`): en
+        // el encuadre inicial la caja de una sede tapaba el rótulo del enlace que salía de ella.
+        // Rótulos con mesura: en un mapa con siete enlaces, siete rótulos largos eran una maraña.
+        // Siempre el de un enlace con problemas; los demás, al pasar el ratón por el enlace o si
+        // toca la sede señalada.
+        const ver = l.state === 'error' || l.state === 'warning' || l.uid === _dcmHotLink
+            || (_dcmHot && (l.a_site === _dcmHot || l.b_site === _dcmHot));
+        if (parte === 'labels') return ver ? rotulo : '';
+        return `<g data-link="${escAttr(l.uid || '')}"><path d="${d}" fill="none"
+                    stroke="var(--bs-body-bg)" stroke-width="${6.5 * k}" stroke-linecap="round"
+                    opacity=".8"></path>
+            <path d="${d}" fill="none"
+                    stroke="var(--bs-${tono})" stroke-width="${3.5 * k}" stroke-linecap="round"
+                    ${raya}></path>
+            <path d="${d}" fill="none" stroke="transparent" stroke-width="${16 * k}"
+                  pointer-events="stroke" style="cursor:help"
+                  onpointerenter="_dcmLinkHot(${jsStr(l.uid || '')})"
+                  onpointerleave="_dcmLinkHot('')"><title>${esc(l.label || '')}</title></path>
+            ${parte === 'lines' || !ver ? '' : rotulo}
         </g>`;
     }).join('');
 }
@@ -267,10 +353,15 @@ function _dcmLabels(sites) {
     }
     const k = _dcmScale();
     const w = _DCM.W * k, h = _DCM.H * k, aire = 6 * k;
+    // Con mapa, tarjeta solo para lo que hay que mirar: una sede en aviso o en error, y la
+    // señalada. Una sede que está bien —o sin vigilar— es su chincheta de color y nada más:
+    // siete tarjetas de «bien» tapaban el mapa y escondían la que estaba caída. Pasar el ratón
+    // por la chincheta la señala, y entonces sí saca la suya.
+    const mira = (s) => s.uid === _dcmHot || s.state === 'error' || s.state === 'warning';
     // Al revés del orden de dibujo, que va de menos a más importante porque lo último tapa. Y
     // quien reparte es el panel (`ssLabelsFit`), que es el mismo que reparte en el mapa del
     // cuadro de mando: dos copias de esta regla serían dos mapas que la aplican distinto.
-    return ssLabelsFit(_dcmOrder(sites).slice().reverse().map(([s, i]) => {
+    return ssLabelsFit(_dcmOrder(sites).filter(([s]) => mira(s)).slice().reverse().map(([s, i]) => {
         const at = _dcmAt(s, i);
         return {key: s.uid, w: w, h: h, x: at.x - w / 2, y: at.y - h - aire};
     }));
@@ -336,10 +427,12 @@ function _dcmSite(site, i, rotulo) {
     return `<g class="${_dcimMove && _dcimMay('dcim_edit') ? 'ss-grab' : ''}"
                data-dcm="${escAttr(site.uid)}"
                onpointerenter="_dcmRaise(${jsStr(site.uid)})"
+               onpointerleave="_dcmCool()"
                ${apagada ? 'opacity=".35"' : ''}
                transform="translate(${at.x},${at.y})">
         ${_dcmTileUrl() && malo ? `<circle r="${(conRotulo ? 5 : 7) * k}" fill="var(--bs-${tone})"
-             class="ss-ping${site.state === 'error' ? ' ss-pulse-fast' : ''}"></circle>` : ''}
+             class="ss-ping${site.state === 'error' ? ' ss-pulse-fast' : ''}"
+             pointer-events="none"></circle>` : ''}
         ${_dcmTileUrl() ? `<circle r="${(conRotulo ? 5 : 7) * k}" fill="var(--bs-${tone})"
              stroke="var(--bs-body-bg)" stroke-width="${2 * k}"></circle>` : ''}
         ${!conRotulo ? `<title>${esc(site.name)}</title>` : `
@@ -369,7 +462,7 @@ function _dcmSite(site, i, rotulo) {
                                             })">!</text>` : ''}
             <text x="${(malo ? 34 : 12) * k}" y="${26 * k}" fill="var(--bs-body-color)"
                   font-size="${15 * k}" font-weight="600">${
-                esc(_dcmClip(site.name, malo ? 17 : 20))}</text>
+                esc(_dcmClip(site.name, malo ? 19 : 22))}</text>
             <text x="${12 * k}" y="${48 * k}" fill="var(--bs-secondary-color)"
                   font-size="${12 * k}">${
                 esc(tf('dcim_board_tile', site.racks || 0, site.rooms || 0))}</text>
@@ -518,7 +611,10 @@ function _dcmCool() {
  *  Devuelve pares `[sede, i]` porque la posición sin mapa se calcula a partir del índice: el
  *  sitio de una caja en la rejilla no puede depender de cómo esté esa sede hoy. */
 function _dcmOrder(sites) {
-    const peso = (s) => (s.uid === _dcmHot ? 9 : (_DCM_RANK[s.state] || 0));
+    // Con el mismo estado, la que tiene MÁS cosas mal: dos sedes caídas a veinte píxeles, la
+    // de 99 checks caídos no puede quedarse sin tarjeta por la de 3.
+    const mal = (s) => Math.max(0, (Number(s.total) || 0) - (Number(s.ok) || 0));
+    const peso = (s) => (s.uid === _dcmHot ? 9e9 : (_DCM_RANK[s.state] || 0) * 1e8 + mal(s));
     return (sites || []).map((s, i) => [s, i]).sort((a, b) => peso(a[0]) - peso(b[0]));
 }
 
@@ -536,7 +632,9 @@ function _dcmRedraw() {
     // Las líneas también: van de caja a caja, así que arrastrar una y no repintarlas dejaría el
     // enlace apuntando a donde la sede estaba.
     const lineas = document.getElementById(_DCM_SVG + '-links');
-    if (lineas) lineas.innerHTML = _dcmLinks(sites);
+    if (lineas) lineas.innerHTML = _dcmLinks(sites, 'lines');
+    const rotulos = document.getElementById(_DCM_SVG + '-linklabels');
+    if (rotulos) rotulos.innerHTML = _dcmLinks(sites, 'labels');
 }
 
 /** Enganchar el dibujo a la ventana del lienzo, después de que el navegador lo tenga puesto.

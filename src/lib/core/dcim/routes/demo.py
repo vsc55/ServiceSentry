@@ -47,7 +47,7 @@ def register(app, wa, C):
                                    lang=wa._lang(), images=True, replace=replace, **_dirs())
         except dcim_demo.DemoError:
             return jsonify({'error': wa._t('dcim_demo_exists')}), 409
-        counts = {k: v for k, v in made.items() if k not in ('site', 'site_dr')}
+        counts = {k: v for k, v in made.items() if k not in dcim_demo.UID_KEYS}
         wa._audit('dcim_demo_installed', detail={'replace': replace, 'counts': counts})
         return jsonify({'ok': True, 'counts': counts})
 

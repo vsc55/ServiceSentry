@@ -8,6 +8,136 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.146] - 2026-10-12
+
+### Added
+
+- **The DCIM demo draws a WAN of six sites, with links and a whole site down.** Five small sites
+  —«Demo · Respaldo» (Barcelona), «Demo · Texas» (Dallas), «Demo · Puerto Rico» (San Juan),
+  «Demo · Sudáfrica» (Johannesburg) and «Demo · Taiwán» (Taipei)—, each with a technical room, a
+  rack and mains plus UPS, and seven links ending on items: Demo↔Respaldo twice for HA (MPLS up,
+  IPsec down because FW-DR is in error), Demo↔Texas MPLS (up), Texas↔Puerto Rico SD-WAN
+  (warning), Demo↔South Africa MPLS (down: the South African site is entirely offline, every
+  item in error), and Taiwan with two paths, MPLS to Madrid and SD-WAN to Texas (both up). No
+  link is left unwatched, removal and rebuilding find all six sites by name in every language,
+  and the CLI reports «sites 6, links 7».
+- **Say where each PDU goes in a rack.** A vertical (0U) PDU names its rear channel —`side_pos`
+  `rear-left`/`rear-right`, seen from behind— and its order in it (`side_slot`: 0 outer, 1
+  inner), so two can share one side or sit one on each; empty is automatic, the old alternation,
+  and every PDU written before renders exactly as it did. A horizontal PDU is one bolted in its
+  U at the front or the rear, checked by the same `fits` as any item, and its outlets feed
+  exactly like a vertical one's.
+- **The elevation draws vertical PDUs in their channels.** Strips beside the rear face, left and
+  right as seen from behind, the outer one further from the rail; hovering one says its channel,
+  and they no longer repeat in the «no U» list below the drawing.
+- **The demo shows the three PDU layouts.** Main-site racks one PDU per rear channel, the
+  network row both in the left channel, the small sites two 1U PDUs at the rear (the recovery
+  centre one 1U and one vertical), and the corridor wall rack a 1U PDU at its front.
+- **The sidebar can be put in your own order.** «Customise menu» in the user menu turns the
+  sidebar into an editor: drag entries or use the up/down arrows (keyboard-accessible) to
+  reorder the first level —sections and the Catalogue/System groups— and the entries within each
+  group; Save, Cancel, Escape and «Reset order» (behind a confirmation). The order is stored per
+  user on the server (`sidebar_order` in `PUT /api/v1/users/me/preferences`, served by
+  `/api/v1/me`) as stable keys, never labels, and applied before the menu is shown, with no
+  reload.
+- **A saved menu order survives the menu changing.** An entry the saved order does not know —a
+  new section, a module added later, a permission granted later— lands right after its default
+  neighbour; keys that no longer exist are ignored; entries the user cannot open stay hidden
+  wherever they are placed. The server bounds the record (key format, 200 entries per list, 16
+  groups, 16 KB) and refuses anything else with a 400 before touching the other fields of the
+  request.
+
+### Changed
+
+- **The rack in 3D puts each PDU where it is declared.** Vertical ones in their channel (outer
+  against the side panel, inner beside it), horizontal ones as a 1U box at their U and face;
+  power cords end on the PDU's outlets wherever it is —down the rear cable plane for a rear one,
+  round the side channel to the front face for a front one.
+- **The item form asks a PDU «horizontal (U)» or «vertical (0U)»,** and only what sits on the
+  side is asked its position and order; the API refuses an unknown position or an order other
+  than 0/1 with a 400, and moving an item off the side clears both.
+- **The rack history and somebody else's items carry the channel.** A position change is a
+  history line (older snapshots without it are not), and a foreign PDU is still drawn in its
+  channel, anonymous.
+
+### Fixed
+
+- **A room's name fits its room on the floor plan.** It was sized from the room's short side
+  alone, so «Sala de reuniones Atlántico» in a seven-metre room drew twice as wide as the room,
+  over its neighbours; it now shrinks to 90 % of the width, is cut with «…» when even the
+  smallest size does not fit (the full name stays in the room's tooltip), and the size line fits
+  on its own.
+- **The line between two sites can be seen on a satellite map, and so can its label.** It was a
+  thin coloured stroke at 85 % opacity and a label in the secondary grey; it now runs over a
+  halo of the background colour, thicker and opaque, and the label is bolder with an outline, in
+  both themes.
+- **Several links between the same two sites are drawn apart.** Two links for HA between one
+  pair of sites went along the same straight line, so only one was seen and their labels were
+  written on top of each other («TroncRespaldo IPsecelona»); they now fan out in symmetric arcs,
+  each label at the outer side of its own arc, and A→B and B→A bend the same way.
+- **Link labels are drawn above the site boxes, and room names stay legible.** In the initial
+  framing a site's box covered the label of the link leaving it; labels now have their own layer
+  on top. A room name that cannot fit is cut at 4.5 units instead of shrinking to an unreadable
+  3 (about 5 px), the width estimate was tightened after measuring in the browser, and the size
+  line is never bigger than the name.
+- **The site map shows what needs looking at.** With a map, only a site in warning or error (or
+  the one pointed at) carries its card; a site that is fine, or unwatched, is its coloured pin,
+  and pointing at the pin brings its card. A link's label shows always when the link is in
+  trouble, and otherwise only when the pointer is on the link (a wider invisible band makes it
+  easy to hit) or on one of its sites. The initial framing hugs the sites, with a margin per
+  axis and room above for the cards, instead of a 40 % square that opened the whole world.
+- **Rooms on no floor are seen in 3D, and every demo room has a door.** A site whose rooms sit
+  on no floor —the demo's small sites, each only a technical room— opened in /3d as «this site
+  has no floors» and drew nothing, because the site's contents skipped every room without a
+  floor. Those rooms now come in the contents (filtered as any other), and the 3D shows them on
+  a read-only «Rooms without a floor» floor, laid side by side by name (beside the building in
+  the building view), which a floorless site opens straight into; a room's or rack's «3D» link
+  goes there too. The 2D editor does not offer that floor: it has nowhere to save positions. The
+  small sites' technical rooms also had no door, a closed box in the plan and the walk; each has
+  a fire door now.
+- **On the site map, the worse of two sites side by side keeps its card, the highlight goes when
+  the pointer leaves, and link labels stay off the cards.** «Demo» (99 checks down) lost its
+  card to «Respaldo» (3 down) twenty pixels away: with the same state, the one with more checks
+  down now wins. Pointing at a pin left it highlighted and every other site dimmed until the
+  list below was left; leaving the pin now clears it, and the pulsing ring no longer catches the
+  pointer. A link label looks along its arc for a spot off every card and is left out (until the
+  link is pointed at) when there is none: «Respaldo IPsec» covered «Caído · 4/7». The card is a
+  little wider, so «Demo · Puerto Rico» is not cut.
+- **Going to the board closes the site plan that was open.** From a site's plan to the board by
+  the sidebar, a click on another site on the map went back to the old plan, because only
+  «Inventory» cleared it.
+- **The 3D wheel zooms toward what is under the pointer, up and down too.** It aimed at the
+  ground at the height of the point looked at and moved only across, so in a rack seen from the
+  front the wheel never went up or down to the unit pointed at. It now takes the first solid
+  thing the pointer's ray meets (a unit's face, a wall, a floor; the ground if nothing) and
+  zooms around that point in all three axes, so it stays under the cursor. It is the shared 3D
+  engine: rooms, floors and the building get it too.
+- **A small rack's cables are seen in its 3D.** The demo's Puerto Rico rack looked cableless:
+  items with no depth of their own are drawn nearly as deep as the rack, and the rear run of the
+  cables, fixed at 13 cm from the back, went through the servers, while the vertical channel
+  went through the side strip of a 600 mm rack. The rear run now goes just behind the deepest
+  thing in the rack (and in front of the posts), and the small demo sites' items carry their
+  depth, as the rest of the demo does.
+- **Removing the demo sits beside installing it in Maintenance.** It was there, but in «Data
+  deletion» among eight wipes, while «Install» had a group of its own, so it could not be found;
+  both now share «Demonstration data», and removing stays red and asks first.
+- **On a phone the user menu could not be opened.** Tapping the user button closed the
+  off-canvas drawer, and the menu inside it slid off-screen with it; the drawer now stays open
+  for that button.
+
+### Tests
+
+- `tests/integration/test_wa_dcim_map_labels.py` (in `node`): a long room name fits or is cut, a
+  short one keeps its size, and the site link has its halo and an outlined label; each checked
+  to fail with its fix undone.
+- **The `node` harness behaves the same on every Node.** CI runs Node 22 and failed 84 probes of
+  `test_wa_dcim_planobj.py` and `test_wa_plan2d.py` that passed on a workstation whose first
+  `node` was v12: on the modern one the whole bundle runs and reached `CSS.escape` and
+  `bootstrap.Toast`, which the fake DOM lacked, and a rejected promise nobody handled ends the
+  process from Node 15 on. The fake DOM now has both, an unhandled rejection is the probe's
+  error on every Node, and `SS_NODE` picks the interpreter (`tests/.env.test`). All 53 files
+  that use the harness pass on Node 24.
+
 ## [0.0.1+build.145] - 2026-10-12
 
 A second audit of the whole code base, run after the first one closed in build.144: nine read-

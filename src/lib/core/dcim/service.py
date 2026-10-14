@@ -732,6 +732,11 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
             'capacity_w': cap,
             'load': round(declarado / cap, 3) if cap else None,
             'device_uid': str(p.get('device_uid') or ''),
+            # What the strip's own form edits and the list does not show.
+            'description': str(p.get('description') or ''),
+            # The colour as WRITTEN (empty = its branch's): the form needs it to tell a colour of
+            # its own from the branch default, or saving would pin the default for good.
+            'color_own': str(p.get('color') or '').strip(),
             # Resuelto aquí y no en la pantalla: dos sitios decidiendo de qué color va una rama
             # acaban pintándola de dos colores distintos en dos vistas de lo mismo.
             'color': str(p.get('color') or '').strip()

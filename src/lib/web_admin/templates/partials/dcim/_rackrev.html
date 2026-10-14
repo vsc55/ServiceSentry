@@ -95,7 +95,9 @@ function _dcHistOne(c) {
             >− ${quien} · ${esc(_dcHistWhere(c.from))}</span>`;
     const campo = esc(_dcHistField(c.field));
     // Where something is placed is a choice of three, said with its words and not its code.
-    const val = (v) => c.field === 'placement' ? t('dcim_place_col_' + (v || 'u')) : _dcHistVal(v);
+    const val = (v) => c.field === 'placement' ? t('dcim_place_col_' + (v || 'u'))
+        : c.field === 'side_pos' ? t('dcim_side_pos_' + (v || ''))
+        : c.field === 'side_slot' ? t('dcim_side_slot_' + (Number(v) || 0)) : _dcHistVal(v);
     const de = esc(val(c.from)), a = esc(val(c.to));
     if (c.kind === 'rack')
         return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
@@ -135,6 +137,7 @@ const _DC_HIST_FIELD = {
     asset: 'dcim_item_asset', device_uid: 'dcim_device', parent_uid: 'dcim_item_parent',
     u_slots: 'dcim_item_slots', u_slot: 'dcim_item_slot',
     u_slot_span: 'dcim_item_slot_span', u_split: 'dcim_item_split',
+    side_pos: 'dcim_side_pos', side_slot: 'dcim_side_slot',
     name: 'dcim_rack_name', desc_units: 'dcim_numbering', width_mm: 'dcim_width_mm',
     depth_mm: 'dcim_depth_mm', room_uid: 'dcim_room',
 };
@@ -187,8 +190,9 @@ function _dcRevCompare(antes, ahora) {
     Object.keys(b).forEach(uid => {
         if (!a[uid]) return;
         Object.keys(b[uid]).forEach(k => {
-            // A photo from before `placement` was kept has no such key: not a change (as the server).
-            if (k === 'placement' && !(k in a[uid])) return;
+            // A photo from before `placement` (or the side channel) was kept has no such key:
+            // not a change (as the server).
+            if (['placement', 'side_pos', 'side_slot'].includes(k) && !(k in a[uid])) return;
             if (k !== 'uid' && a[uid][k] !== b[uid][k])
                 fuera.push({kind: 'edit', label: b[uid].label || a[uid].label,
                             field: k, from: a[uid][k], to: b[uid][k]});

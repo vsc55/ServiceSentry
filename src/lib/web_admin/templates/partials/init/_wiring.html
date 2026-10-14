@@ -279,6 +279,9 @@ document.getElementById('btn-subtab-apitokens')?.addEventListener(
 (async function init() {
 try {
     currentUser = await apiGet('/api/v1/me') || {};
+    // The reader's own menu order, while every entry is still hidden behind the boot overlay:
+    // arranged before applyRoleRestrictions() reveals any, so nothing is seen jumping.
+    _sbApplyOrder(currentUser.sidebar_order);
     _applyUserTableConfig(currentUser.table_config || {});
     _applyUserModalConfig(currentUser.modal_config || {});
     rolesData = await apiGet('/api/v1/roles') || {};

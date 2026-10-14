@@ -638,8 +638,10 @@ def register(app, wa, C):
     @app.route('/api/v1/dcim/sites/<uid>/contents', methods=['GET'])
     @C.view_req
     def api_dcim_site_contents(uid):
-        """What is inside every room of a site that sits on a floor — racks and pieces — in one
-        answer, keyed by room.
+        """What is inside every room of a site — racks and pieces — in one answer, keyed by room.
+
+        Rooms on no floor too: the 3D shows them on a floor of their own ("rooms without a
+        floor"), and a site made only of those drew nothing — their racks were never sent.
 
         The floor plan and the building in 3D draw all of it at once. Asked room by room it was
         two requests per room, and every rack list recomputed the state of the whole tree: a
@@ -658,8 +660,6 @@ def register(app, wa, C):
         roll = dcim_svc.tree_roll(store, estados, said, allowed)
         rooms = {}
         for room in store.rooms_of(uid):
-            if not room.get('floor_uid'):
-                continue
             racks = C.filtered(store.racks_of(room['uid']), store, said, allowed, 'rack', reach)
             for rack in racks:
                 rack['roll'] = roll['rack'].get(rack['uid']) or {}

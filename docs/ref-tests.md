@@ -4,6 +4,8 @@
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
+> **Sondas en `node` (`tests/helpers.py`, `node_run`):** cargan el guion del panel con un DOM de mentira y ejecutan una prueba encima. **Usa un Node moderno**: la CI corre Node 22, y con uno viejo (v12) parte del guion no llega a ejecutarse y los fallos se esconden. `SS_NODE` elige el intérprete (ponlo en `tests/.env.test`); una promesa rechazada sin manejar cuenta como error de la prueba en cualquier versión.
+
 > **Motor de BD en tests:** la suite corre sobre **SQLite** (que tolera SQL no portable). Los bugs específicos de **MySQL/MariaDB** y **PostgreSQL** (los motores de producción) se cubren con un arnés **opt-in** que corre los stores contra motores reales cuando se definen variables de entorno — ver §81. Sin esas variables, ese arnés se salta y no afecta al build.
 
 ---
@@ -10868,7 +10870,7 @@ a su vez tapa un rack, y un navegador de mentira que devuelve los tres bajo el p
 
 ## 182. Integración — Una planta, o el edificio entero, en 3D
 
-**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 34 tests
+**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 35 tests
 
 Ejecuta en `node` el guion de verdad del panel sobre una sede de tres plantas (sótano, baja y
 primera). La baja tiene un plano de 30 m, una sala girada 90° con un rack, una sala sin medidas
@@ -11395,7 +11397,7 @@ inventario, para enseñarlo.
 
 ## 200. Integración — Dónde está cada puerto de un modelo
 
-**Archivo:** `tests/integration/test_dcim_portmap.py` — 31 tests
+**Archivo:** `tests/integration/test_dcim_portmap.py` — 32 tests
 
 Las bibliotecas de modelos dicen cuántos puertos hay y cómo se llaman, no dónde están. Se pidió
 poder situarlos sobre la foto y ver en la tabla qué modelos están hechos.
@@ -11714,7 +11716,7 @@ Una placa de pared no es de un solo tipo: la roseta y la toma de corriente guard
 
 ## 217. Integración — Los datos de demostración desde Mantenimiento
 
-**Archivo:** `tests/integration/test_wa_dcim_demo_admin.py` — 3 tests
+**Archivo:** `tests/integration/test_wa_dcim_demo_admin.py` — 4 tests
 
 Se pidió una opción en Mantenimiento para añadir o eliminar los datos de demostración, como `main.py dcim demo` desde la línea de órdenes. Por la API (`/api/v1/dcim/demo`): dice si están, los instala, no los instala dos veces si no se pide rehacerlos (409), los rehace con `replace`, los borra sin tocar una sede que no es de la demo, apunta las dos cosas en la auditoría, y solo quien tiene `db_maintenance` puede hacer nada de ello (con editar el inventario no basta). Y los dos botones: borrar pregunta antes y llama a la ruta por el emisor de la sección. Sin el permiso de Mantenimiento, cae.
 
@@ -11959,3 +11961,33 @@ Ejecuta en un Windows de verdad los comandos exactos que mandan los tres módulo
 **Archivo:** `tests/integration/test_wa_max_redirects.py` — 6 tests
 
 `web_admin|max_redirects` vale 10 por defecto; una descarga protegida sigue exactamente ese número de saltos y falla con uno más; un valor inválido vuelve al defecto; en el worker gana `SS_MAX_REDIRECTS` si es válido; guardar el ajuste lo aplica y solo puede un admin; y el worker lo aplica en cada ciclo.
+
+## 252. DCIM — Rótulos legibles en el plano de planta y en el mapa de sedes
+
+**Archivo:** `tests/integration/test_wa_dcim_map_labels.py` — 13 tests
+
+En `node`: el nombre de una sala encoge hasta caber en su ancho o se recorta con «…» (el corto conserva su tamaño), y la línea entre dos sedes va sobre un halo del color del fondo con el rótulo con contorno, para leerse sobre el satélite; dos enlaces entre las mismas sedes van por arcos distintos, con los rótulos separados y en una capa por encima de las cajas de las sedes; la medida de una sala nunca es mayor que su nombre; el rótulo de un enlace que está bien solo sale al señalarlo o al señalar una de sus sedes; el encuadre inicial se ciñe a las sedes en vez de abrir el mundo entero; de dos sedes caídas juntas, la tarjeta es de la que tiene más checks caídos; salir de una chincheta apaga el resalte; el rótulo de un enlace se aparta de las tarjetas o espera a que se señale el enlace; e ir al cuadro de mando cierra el plano de sede que estuviera abierto.
+
+## 253. DCIM — La WAN de la demostración
+
+**Archivo:** `tests/integration/test_dcim_demo_wan.py` — 12 tests
+
+Las seis sedes de la demo (Demo, Respaldo, Texas, Puerto Rico, Sudáfrica y Taiwán) con sus coordenadas, sala, rack y fuentes; entre Demo y Respaldo dos enlaces de alta disponibilidad, el MPLS bien y el IPsec caído; Texas por MPLS bien y Puerto Rico por SD-WAN en aviso; Sudáfrica entera caída y colgada de un único enlace, caído; Taiwán con dos caminos, los dos bien; ningún enlace sin vigilar; el cuadro de mando lleva sus estados; toda sala de las seis sedes tiene puerta, salvo las zonas generales de planta; borrar la demo hecha en otro idioma quita las seis sedes con sus enlaces; reconstruirla no duplica nada.
+
+## 254. DCIM — Salas sin planta en 3D
+
+**Archivo:** `tests/integration/test_wa_dcim_loose_rooms_3d.py` — 8 tests
+
+`/contents` trae también los racks de una sala sin planta, con la misma forma y sin filtrar la de otra empresa; una sede sin plantas abre en 3D directamente en la planta virtual «Salas sin planta», con las salas en fila y sus racks, y sin el aviso de «no tiene plantas», que solo sale si la sede no tiene ni plantas ni salas; el enlace «3D» de una sala o un rack sin planta lleva a ella; con plantas reales se puede pedir y va la última; en el edificio se coloca al lado, y el doble clic en una de sus salas lleva a ella.
+
+## 255. DCIM — Dónde va cada regleta (PDU) en el armario
+
+**Archivo:** `tests/integration/test_wa_dcim_pdu_position.py` — 32 tests
+
+`side_pos` (trasera izquierda/derecha, vacío = automático) y `side_slot` (exterior/interior) en las regletas verticales: valores por defecto, 400 ante valores fuera de lista, ida y vuelta por la API, se vacían al salir del lateral, historial y equipos ajenos. Una horizontal ocupa su U, `fits` rechaza lo que se le solape y se puede enchufar a ella. En `node`: la regla de colocación, el alzado (izquierda, derecha, mismo lado y horizontal), la posición de cada caja en el 3D (el automático, igual que antes), el enchufe en la cara correcta, la ficha y la demo.
+
+## 256. Panel — Orden del menú lateral por usuario
+
+**Archivo:** `tests/integration/test_wa_sidebar_order.py` — 23 tests
+
+Guardar, leer y restablecer el orden (`sidebar_order` en las preferencias del usuario), auditoría, validación con 400 (formato de clave, topes de tamaño) sin aplicar nada a medias, sin sesión no se escribe y cada usuario solo escribe el suyo. En `node`: las reglas de mezcla (una entrada nueva cae tras su vecina por defecto, las claves retiradas se ignoran, lo oculto sigue oculto), el menú redibujado en el orden guardado, el orden por defecto se guarda como vacío, las flechas saltan lo oculto y se paran en el borde, y los controles de edición. También que el clic en modo edición no navega y que en el móvil el botón de usuario no cierra el cajón.

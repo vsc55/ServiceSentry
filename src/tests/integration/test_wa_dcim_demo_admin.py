@@ -90,3 +90,13 @@ def test_the_buttons_ask_first_and_call_the_route(client):
     b = out['borrar']
     assert b['pregunta'] == 1 and b['envio'][:2] == ['DELETE', '/api/v1/dcim/demo'] and b['planOlvidado']
 
+
+
+def test_install_and_remove_sit_side_by_side_in_maintenance(admin, client):
+    """Reported: «I don't see the option to delete the demo data». It was there, in «Data
+    deletion» among eight wipes, while «Install» had a group of its own: both go together."""
+    _login(client)
+    cards = client.get('/api/v1/config/layout').get_json()['cards']
+    acts = next(c for c in cards if (c.get('section') or c.get('id')) == 'maintenance')['actions']
+    grupo = {a['id']: a.get('group_label_key') for a in acts}
+    assert grupo['dcim_demo_remove'] == grupo['dcim_demo_install'] == 'cfg_actions_group_demo'

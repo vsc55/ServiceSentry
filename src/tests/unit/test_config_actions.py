@@ -107,9 +107,12 @@ class TestMaintenanceCard:
         assert None not in by_group,             f'ungrouped maintenance actions: {by_group.get(None)}'
         assert by_group.get('cfg_actions_group_db') == {'db_optimize', 'db_compact'}, (
             'a group whose heading says it never deletes anything grew an action that does')
-        assert len(by_group.get('cfg_actions_group_wipe', ())) == 9
-        assert by_group.get('cfg_actions_group_demo') == {'dcim_demo_install'}, (
-            'installing the demo is not a wipe, and removing it is')
+        assert len(by_group.get('cfg_actions_group_wipe', ())) == 8
+        # The demo's two actions sit together: among eight wipes, «remove» could not be found
+        # (reported). It stays red and asks first — that is what marks it destructive.
+        assert by_group.get('cfg_actions_group_demo') == {'dcim_demo_install', 'dcim_demo_remove'}
+        remove = next(a for a in self._card()['actions'] if a['id'] == 'dcim_demo_remove')
+        assert remove.get('variant') == 'danger'
 
     def test_every_action_says_what_it_does(self):
         """A button caption fits a verb and a noun — enough to recognise an action you

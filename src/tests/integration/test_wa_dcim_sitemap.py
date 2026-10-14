@@ -475,18 +475,19 @@ class TestVariasSedesDeLaMismaCiudadNoSonVariosRotulos:
         ciudad con vecinas no se podría leer nunca."""
         assert mapa['rotulosSenalando'] == ['p1'], mapa['rotulosSenalando']
 
-    def test_pero_las_que_no_se_pisan_lo_conservan(self, mapa):
-        """Lo que no puede romperse al arreglar lo otro: tres capitales europeas son tres
-        rótulos, y ahí no sobra ninguno."""
-        assert mapa['rotulosLejos'] == ['ber', 'lis', 'rom'], mapa['rotulosLejos']
+    def test_solo_lleva_tarjeta_lo_que_hay_que_mirar(self, mapa):
+        """Con mapa, tarjeta solo para una sede en aviso o en error (o la señalada): tres
+        capitales sin vigilar y una caída son una tarjeta, la de la caída. Las demás son su
+        chincheta de color — pedido desde la pantalla: las tarjetas de «bien» tapaban el mapa."""
+        assert mapa['rotulosLejos'] == ['rom'], mapa['rotulosLejos']
 
     def test_y_de_dos_vecinas_se_queda_la_que_esta_peor(self, mapa):
         """Las dos primeras del juego están a cuatro kilómetros, que a la escala de un mapa de
         Europa es el mismo punto: `s2` está caída y `s1` bien, así que el sitio es de `s2`."""
         assert 's2' in mapa['rotulosSueltas'] and 's1' not in mapa['rotulosSueltas'], (
             mapa['rotulosSueltas'])
-        # …y la de París, que no se pisa con nadie, conserva el suyo.
-        assert 's4' in mapa['rotulosSueltas']
+        # …y la de París, sin vigilar, se queda en su chincheta.
+        assert 's4' not in mapa['rotulosSueltas']
 
     def test_y_la_que_se_queda_sin_el_sigue_diciendo_cual_es(self, mapa):
         """Una chincheta muda es un punto de color en un mapa: dice que ahí hay algo y no dice

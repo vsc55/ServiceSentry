@@ -363,7 +363,8 @@ def register(app, wa):
     @app.route('/api/v1/users/me/preferences', methods=['PUT'])
     @login_required
     def api_save_my_preferences():
-        """Save the current user's own appearance preferences (lang, dark_mode)."""
+        """Save the current user's own preferences (lang, dark_mode, landing page, table,
+        modal and dashboard layouts, and the order of the sidebar)."""
         data, err = wa._require_json()
         if err:
             return err
@@ -371,6 +372,14 @@ def register(app, wa):
         user = wa._users.get(uname)
         if not user:
             return jsonify({'error': wa._t('user_not_found')}), 404
+        # Checked before anything is touched: a refusal must not leave the other fields of the
+        # same request half-applied in memory.
+        so = None
+        if 'sidebar_order' in data:
+            try:
+                so = users_svc.validate_sidebar_order(data['sidebar_order'])
+            except users_svc.AdminOpError as e:
+                return jsonify({'error': wa._t(e.key, *e.args)}), 400
         changes = {}
         if 'lang' in data:
             lang = data['lang']
@@ -429,6 +438,18 @@ def register(app, wa):
                 return jsonify({'error': wa._t('access_denied')}), 403
             if isinstance(dl, list):
                 user['dashboard_layout'] = dl
+        if 'sidebar_order' in data:
+            # The user's own arrangement of the left menu. Bounded and shape-checked above (a
+            # record nobody else reads still lives in the users table); `null` or `{}` is
+            # "back to the default order", which removes the key instead of storing an empty one.
+            had = bool(user.get('sidebar_order'))
+            if so is None:
+                user.pop('sidebar_order', None)
+            else:
+                user['sidebar_order'] = so
+            if had or so is not None:
+                changes['sidebar_order'] = {'old': 'custom' if had else 'default',
+                                            'new': 'custom' if so is not None else 'default'}
         wa._persist_users()
         if changes:
             wa._audit('user_preferences_changed', detail={'username': uname, 'changes': changes})

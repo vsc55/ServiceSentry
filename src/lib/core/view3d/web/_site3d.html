@@ -114,6 +114,50 @@ async function _ds3LoadImages() {
     _dc3dRebuild();
 }
 
+// ── Las salas que no están en ninguna planta ─────────────────────────────────────────────
+//
+// Una sede puede tener salas sin planta: la de un CPD de respaldo dado de alta sin edificio, o
+// una cuya planta se borró. No tenían sitio en el 3D —que dibuja plantas y las salas puestas en
+// ellas—, y una sede SOLO con salas así decía «esta sede no tiene plantas» y no dibujaba nada.
+// Se miran en una planta que no existe, «Salas sin planta», con esas salas una al lado de otra
+// por orden de nombre. Es solo para mirar: no hay planta en la que guardar una posición, y el
+// editor de la planta (`_siteplan.html`) no la ofrece; allí esas salas siguen en su lista, con
+// su botón para colocarlas en una planta de verdad.
+
+//: El uid de esa planta: no es el de ninguna (los de verdad son uids del servidor).
+const _DS3_LOOSE = '_loose';
+//: El pasillo entre una sala y la siguiente, en mm.
+const _DS3_LOOSE_GAP = 2000;
+//: Y entre el edificio y esa fila de salas, en m: va al lado del edificio, no encima.
+const _DS3_LOOSE_ASIDE = 5;
+
+/** Las salas sin planta, colocadas: una copia de cada una en la planta de mentira, de izquierda
+ *  a derecha por nombre, sin girar y con un pasillo entre ellas. Determinista: la misma sede da
+ *  siempre la misma fila. Su `pos_x`/`pos_y` de una planta no cuentan: no están en ninguna. */
+function _ds3LooseRooms() {
+    let x = 0;
+    return _dcsLoose().slice()
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))
+                        || String(a.uid).localeCompare(String(b.uid)))
+        .map(r => {
+            const puesta = Object.assign({}, r, {floor_uid: _DS3_LOOSE, pos_x: x, pos_y: 0, rotation: 0});
+            x += _dcsSize(r).w + _DS3_LOOSE_GAP;
+            return puesta;
+        });
+}
+
+/** Poner o quitar la planta de mentira en `_dcsPlan.floors`: está si hay salas sin planta, con
+ *  un nivel por encima de las de verdad —la última de los botones—. Devuelve si está. */
+function _ds3AddLoose() {
+    if (!_dcsPlan) return false;
+    const reales = _dcsPlan.floors.filter(f => !f.virtual);
+    _dcsPlan.floors = reales;
+    if (!_dcsLoose().length) return false;
+    const arriba = reales.reduce((m, f) => Math.max(m, Number(f.level) || 0), -1);
+    reales.push({uid: _DS3_LOOSE, name: t('x3_loose_floor'), level: arriba + 1, virtual: true});
+    return true;
+}
+
 function _ds3Img(floor) {
     if (!_dcsPlan || !floor) return null;
     return floor.uid === _dcsPlan.floor ? _dcsPlan.image : (_ds3Images[floor.uid] || null);
@@ -145,10 +189,11 @@ function _ds3FloorScene(floor, img, veil) {
     const kinds = _dcsPlan.kinds || {};
     const content = _dcsPlan.content || {};
     const area = floor.area_uid || '';
-    const salasAqui = _dcsRooms().filter(r => r.floor_uid === floor.uid);
+    const salasAqui = floor.virtual ? _ds3LooseRooms() : _dcsRooms().filter(r => r.floor_uid === floor.uid);
     // Dónde y cuánto: lo mismo que el plano de la planta, para que las dos vistas cuadren.
     const b = p2dPlanBox(floor, img, _DCS_PLAN_MM);
-    let maxX = 20000, maxY = 15000;
+    // La de las salas sin planta mide lo que ellas: no hay edificio que encuadrar alrededor.
+    let maxX = floor.virtual ? 0 : 20000, maxY = floor.virtual ? 0 : 15000;
     if (img) {
         maxX = Math.max(maxX, b.x + b.w);
         maxY = Math.max(maxY, b.y + b.h);
@@ -223,14 +268,19 @@ function _ds3BuildingScene(actual) {
     const nivelActual = Number((actual || {}).level) || 0;
     const paso = _ds3Explode ? _ds3Apart : _DS3_STOREY;
     const todo = {cajas: [], planos: [], salas: [], rotulos: [], puntos: {}, nombres: {}};
-    let W = 12, D = 8, Y0 = 0, arriba = 3, mira = null;
+    let W = 12, D = 8, Y0 = 0, arriba = 3, mira = null, reales = 0;
     for (const f of plantas) {
-        const nivel = Number(f.level) || 0, Y = nivel * paso;
+        // La planta de mentira (las salas sin planta) no se apila: va al lado del edificio, a ras
+        // de calle y maciza, que no está encima de nada. Es la última del orden, así que el ancho
+        // del edificio ya se sabe.
+        const X = f.virtual && reales ? W + _DS3_LOOSE_ASIDE : 0;
+        const nivel = Number(f.level) || 0, Y = f.virtual ? 0 : nivel * paso;
+        if (!f.virtual) reales += 1;
         const e = _ds3FloorScene(f, _ds3Img(f), _ds3Veil);
-        const tenue = nivel > nivelActual;
+        const tenue = !f.virtual && nivel > nivelActual;
         if (tenue && _ds3HideAbove) continue;
         // 0,25: con menos, la planta de encima apenas se distinguía del fondo.
-        const puesta = ss3dPlace(e, 0, Y, 0, 0, tenue ? 0.25 : 1);
+        const puesta = ss3dPlace(e, X, Y, 0, 0, tenue ? 0.25 : 1);
         // Los rótulos, solo de la planta elegida. Las de debajo son opacas y llevaban los suyos:
         // desde arriba —y más con las de encima ocultas— se leían los nombres de todas las
         // plantas a la vez, mezclados. Se siguen viendo, señalando y pulsando; lo que pierden
@@ -247,10 +297,11 @@ function _ds3BuildingScene(actual) {
         Object.assign(todo.puntos, puesta.puntos);
         Object.assign(todo.nombres, e.nombres);
         if (actual && f.uid === actual.uid) {
-            todo.salas.push(...e.salas.map(s => Object.assign({}, s, {y: Y})));
-            mira = [e.W / 2, Y + 1, e.D / 2];
+            todo.salas.push(...e.salas.map(s => Object.assign({}, s, {y: Y,
+                frame: Object.assign({}, s.frame, {x: s.frame.x + X})})));
+            mira = [X + e.W / 2, Y + 1, e.D / 2];
         }
-        W = Math.max(W, e.W);
+        W = Math.max(W, X + e.W);
         D = Math.max(D, e.D);
         Y0 = Math.min(Y0, Y - 0.4);
         arriba = Math.max(arriba, Y + e.H);

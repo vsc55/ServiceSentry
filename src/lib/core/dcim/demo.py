@@ -5,11 +5,13 @@
 One site called **Demo** that exercises everything the inventory can hold — three floors with a
 background plan and its walls, a stair core, rooms placed on each floor (and loose things in a
 floor's general area), rows and aisles, racks of several shapes (standard, network, wall-mounted,
-partly empty), items of every placement (bolted, half-width, mounted on a shelf, front/rear, side
-PDUs, a UPS on the floor beside a rack), parts, a power chain from the mains to each outlet,
+partly empty), items of every placement (bolted, half-width, mounted on a shelf, front/rear,
+vertical PDUs one in each rear channel or both in one, horizontal 1U PDUs at the rear or the
+front, a UPS on the floor beside a rack), parts, a power chain from the mains to each outlet,
 data cabling inside and between racks and floors, room features (CRAC, aisle containment, trays,
-columns, doors, a cabinet with its shelves) and two companies. A second, small site exists only
-so the WAN links between sites have somewhere to land.
+columns, doors, a cabinet with its shelves) and two companies. Three small sites —a recovery
+centre in Barcelona, an office in Texas and one in Puerto Rico— exist so the WAN links have
+somewhere to land: two between Demo and its recovery centre for HA, the IPsec one down.
 
 Every word the demo writes comes from ``data/demo/<lang>.json``, so it is built in the
 installation's language. Only the main site's name, «Demo», is the same in all of them.
@@ -31,6 +33,10 @@ from lib.core.dcim import media as dcim_media
 
 #: The main site's name, the same in every language.
 SITE = 'Demo'
+#: The small sites' name keys in the word tables: the demo is found and removed by these names.
+BRANCHES = ('site_dr', 'site_tx', 'site_pr', 'site_za', 'site_tw')
+#: The keys of `build`'s result that are site uids and not counts.
+UID_KEYS = ('site',) + BRANCHES
 #: The demo's own catalogue models: their maker, and the origin that marks them as the demo's.
 MAKER = 'Demo'
 SOURCE = 'demo'
@@ -57,6 +63,15 @@ _AIRFLOW = {'server': 'front-to-rear', 'gpu': 'front-to-rear', 'node': 'front-to
             'core': 'front-to-rear', 'router': 'front-to-rear', 'cpe': 'passive',
             'firewall': 'front-to-rear', 'patch': 'none', 'fiber': 'none',
             'console': 'passive', 'kvm': 'passive', 'mini': 'side-to-rear'}
+
+
+#: Where a rack's two PDUs go (`_Builder.pdus`). The usual: a vertical one in each rear channel,
+#: said and not left to the automatic alternation, which draws the same but says nothing.
+PDU_SPLIT = ({'side_pos': 'rear-left'}, {'side_pos': 'rear-right'})
+#: Both in the same rear channel, A against the side panel and B inside it: the other channel is
+#: left for the data cables.
+PDU_SAME_LEFT = ({'side_pos': 'rear-left', 'side_slot': 0},
+                 {'side_pos': 'rear-left', 'side_slot': 1})
 
 
 class DemoError(Exception):
@@ -88,8 +103,9 @@ def find(store) -> list[dict]:
 
     By name alone a real site somebody called «Demo» was the demo, and removing the demo —now a
     button in Maintenance— deleted it with everything in it. The demo writes both sites with its
-    own operator, so that is what tells them apart."""
-    names = {SITE} | _every('site_dr')
+    own operator, so that is what tells them apart. Every site it writes, the small ones too
+    (`BRANCHES`), in every language."""
+    names = {SITE}.union(*(_every(k) for k in BRANCHES))
     operadores = {o['uid'] for o in store.orgs.list()
                   if str(o.get('name') or '') in _every('org_operator')}
     return [s for s in store.sites.list() if str(s.get('name') or '') in names
@@ -247,15 +263,29 @@ class _Builder:
             data['serial'] = self.next_serial('DM')
         return self.new('items', data)
 
-    def pdus(self, rack: str, name: str, sources: tuple, capacity: int = 7400) -> tuple:
-        """The two side PDUs of a rack — the item on the side panel and the PDU row that says
-        which branch it hangs from — and hands back ``(pdu_a, pdu_b)``."""
+    def pdus(self, rack: str, name: str, sources: tuple, capacity: int = 7400,
+             where: tuple = None) -> tuple:
+        """The two PDUs of a rack — the item and the PDU row that says which branch it hangs
+        from — and hands back ``(pdu_a, pdu_b)``.
+
+        *where* says where each one goes, A then B (`PDU_SPLIT` by default: a vertical one in
+        each rear channel). A vertical one is ``{'side_pos', 'side_slot'}``; a horizontal one
+        is ``{'u': n, 'face': 'rear'}`` and takes its U like any item, with the outlets of a 1U
+        strip."""
         out = []
-        for feed, src in zip(('a', 'b'), sources):
-            item = self.item(rack, 'PDU-%s-%s' % (name, feed.upper()), 'pdu', placement='side')
+        for (feed, src), sitio in zip(zip(('a', 'b'), sources), where or PDU_SPLIT):
+            label = 'PDU-%s-%s' % (name, feed.upper())
+            sitio = dict(sitio)
+            if 'u' in sitio:
+                item = self.item(rack, label, 'pdu', sitio.pop('u'), 1,
+                                 face=sitio.pop('face', 'rear'), depth_mm=200, **sitio)
+                tomas = 12
+            else:
+                item = self.item(rack, label, 'pdu', placement='side', **sitio)
+                tomas = 24
             out.append(self.new('pdus', {'rack_uid': rack,
                                          'name': self.w['pdu_pair'] % (name, feed.upper()),
-                                         'feed': feed, 'outlets': 24, 'capacity_w': capacity,
+                                         'feed': feed, 'outlets': tomas, 'capacity_w': capacity,
                                          'source_uid': src, 'item_uid': item}))
         return tuple(out)
 
@@ -385,7 +415,8 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
           images: bool = False) -> dict:
     """Write the demo in *lang*. Refuses when it exists, unless *replace* says to rebuild it.
 
-    Returns ``{'site': uid, 'site_dr': uid}`` plus what was written, counted.
+    Returns ``{'site': uid, 'site_dr': uid, 'site_tx': uid, 'site_pr': uid}`` (`UID_KEYS`)
+    plus what was written, counted.
     """
     if find(store):
         if not replace:
@@ -405,6 +436,21 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     site_dr = b.new('sites', {
         'name': w['site_dr'], 'address': w['site_dr_address'], 'lat': 41.3874, 'lon': 2.1686,
         'timezone': 'Europe/Madrid', 'operator_uid': operator, 'description': w['site_dr_desc']})
+    site_tx = b.new('sites', {
+        'name': w['site_tx'], 'address': w['site_tx_address'], 'lat': 32.7767, 'lon': -96.7970,
+        'timezone': 'America/Chicago', 'operator_uid': operator, 'description': w['site_tx_desc']})
+    site_pr = b.new('sites', {
+        'name': w['site_pr'], 'address': w['site_pr_address'], 'lat': 18.4655, 'lon': -66.1057,
+        'timezone': 'America/Puerto_Rico', 'operator_uid': operator,
+        'description': w['site_pr_desc']})
+    site_za = b.new('sites', {
+        'name': w['site_za'], 'address': w['site_za_address'], 'lat': -26.1076, 'lon': 28.0567,
+        'timezone': 'Africa/Johannesburg', 'operator_uid': operator,
+        'description': w['site_za_desc']})
+    site_tw = b.new('sites', {
+        'name': w['site_tw'], 'address': w['site_tw_address'], 'lat': 25.0330, 'lon': 121.5654,
+        'timezone': 'Asia/Taipei', 'operator_uid': operator, 'description': w['site_tw_desc']})
+    sites = [site, site_dr, site_tx, site_pr, site_za, site_tw]
 
     src = _power_chain(b, site)
     floors = _floors(b, site)
@@ -415,6 +461,8 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     _second(b, site, floors['floor_second'], src, net)
     _third(b, site, floors['floor_third'], src, net)
     _dr(b, site, site_dr, net)
+    _americas(b, site, site_tx, site_pr, net)
+    _far(b, site, site_tx, site_za, site_tw, net)
     _common(b, floors)
     # El cableado estructurado de toda la oficina: los puestos, sus rosetas, el cable horizontal,
     # las subidas, el anillo de fibra (`demo_cabling`). Antes de ordenar
@@ -423,7 +471,7 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     # Y las fuentes: las tomas de corriente de los puestos y las salas cuelgan de ellas.
     net['sources'] = src
     demo_cabling.build(b, site, floors, net)
-    for room in [r for s in (site, site_dr) for r in store.rooms_of(s)]:
+    for room in [r for s in sites for r in store.rooms_of(s)]:
         for rack in store.racks_of(room['uid']):
             b.tidy_outlets(rack['uid'])
     _states(b, site)
@@ -431,8 +479,9 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     _safety(b, floors)
     _place_sources(b, site)
     _room_states(b, site)
-    return {'site': site, 'site_dr': site_dr, 'floors': len(floors),
-            **_counts(store, [site, site_dr])}
+    return {'site': site, 'site_dr': site_dr, 'site_tx': site_tx, 'site_pr': site_pr,
+            'site_za': site_za, 'site_tw': site_tw,
+            'sites': len(sites), 'floors': len(floors), **_counts(store, sites)}
 
 
 def _counts(store, site_uids: list) -> dict:
@@ -832,7 +881,9 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
                            'rotation': 0, 'base_mm': 2250, 'access': 'front'})
     hall_pdu = b.new('pdus', {'rack_uid': hall, 'name': w['pdu_hall'], 'feed': 'a', 'outlets': 8,
                               'capacity_w': 3600, 'source_uid': src['cgbt'],
-                              'item_uid': b.item(hall, 'PDU-P0', 'pdu', 1)})
+                              # Its only door is the front, so its strip is plugged from there.
+                              'item_uid': b.item(hall, 'PDU-P0', 'pdu', 1, face='front',
+                                                 depth_mm=200)})
     b.item(hall, w['patch'] % 'P0', 'patch_panel', 12, face='front', model='patch')
     hall_sw = b.item(hall, 'SW-P0', 'switch', 11, model='access')
     b.feed(hall_sw, hall_pdu, 150)
@@ -894,7 +945,9 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
                                'width_mm': 800, 'depth_mm': 1000, 'pos_x': 1500 + (n - 1) * 800,
                                'pos_y': 7000, 'rotation': 0, 'row_uid': row_n,
                                'rail_front_mm': 100, 'rail_depth_mm': 740, 'rail_rear_mm': 160})
-        pdus = b.pdus(rack, name, (src['a'], src['b']))
+        # The network row keeps both strips on the left: its right channel is where the
+        # patching runs.
+        pdus = b.pdus(rack, name, (src['a'], src['b']), where=PDU_SAME_LEFT)
         net.setdefault('cpd_fiber', []).append(
             b.item(rack, w['fiber_trunk'], 'fiber_panel', 42, face='front', model='fiber'))
         net.setdefault('cpd_patch', []).append(
@@ -908,6 +961,8 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
         core = b.item(rack, 'CORE-%d' % n, 'switch', 38, 2, depth_mm=500, model='core')
         rtr = b.item(rack, 'RTR-%d' % n, 'router', 36, model='router')
         fw = b.item(rack, 'FW-%d' % n, 'firewall', 34, model='firewall')
+        net.setdefault('rtrs', []).append(rtr)
+        net.setdefault('fws', []).append(fw)
         kvm = b.item(rack, w['kvm'] % name, 'kvm', 32, face='front', model='kvm')
         b.item(rack, w['console_server'], 'console', 32, face='rear', model='console')
         for it, role in ((core, 'switch'), (rtr, 'router'), (fw, 'firewall'), (kvm, 'kvm')):
@@ -1609,33 +1664,123 @@ def _safety(b: _Builder, floors: dict) -> None:
             pieza(recep, 'aed', w['aed'], W, D, 'left', 2000)
 
 
-# ── The recovery site and the WAN links ──────────────────────────────────────────────────────
+# ── The small sites and the WAN links ──────────────────────────────────────────────────────
 
-def _dr(b: _Builder, demo: str, site: str, net: dict) -> None:
+def _branch(b: _Builder, site: str, tag: str, ups_name: str,
+            trouble: dict | None = None) -> dict:
+    """A small site: the mains and a UPS, one technical room with one rack —a router, a
+    firewall, a switch and two servers—, cabled and fed from both sides of the UPS. Each active
+    item gets a demo state: ok, but for those *trouble* names (``{label: (state, why_key)}``).
+    Hands back ``{'rtr', 'fw', 'sw'}``, where the WAN links end."""
     w = b.w
     mains = b.new('sources', {'site_uid': site, 'name': w['src_dr_mains'], 'kind': 'mains'})
-    ups = b.new('sources', {'site_uid': site, 'name': w['src_dr_ups'], 'kind': 'ups',
+    ups = b.new('sources', {'site_uid': site, 'name': ups_name, 'kind': 'ups',
                             'upstream_uid': mains, 'capacity_w': 10000, 'autonomy_min': 20})
     room = b.new('rooms', {'site_uid': site, 'name': w['room_dr'], 'width_mm': 5000,
                            'depth_mm': 4000, 'cooling': 'split'})
+    # Its door: a technical room is a special-risk one, so a fire door, as in the main CPD.
+    # Without one the room was a closed box, in the plan and in the 3D walk.
+    b.door(room, 5000, 4000, fire=True)
     rack = b.new('racks', {'room_uid': room, 'name': 'R-01', 'u_height': 42, 'width_mm': 600,
                            'depth_mm': 1000, 'pos_x': 1000, 'pos_y': 800, 'rotation': 180})
-    pdus = b.pdus(rack, 'R-01', (ups, ups))
-    rtr = b.item(rack, 'RTR-DR', 'router', 40, model='router')
-    fw = b.item(rack, 'FW-DR', 'firewall', 38, model='firewall')
-    sw = b.item(rack, 'SW-DR', 'switch', 36, model='tor')
-    for it, role in ((rtr, 'router'), (fw, 'firewall'), (sw, 'switch')):
+    # Small sites: 1U strips bolted at the rear, under the network gear and over the servers. The
+    # recovery centre mixes the two kinds: a 1U strip and a vertical one in the right channel.
+    pdus = b.pdus(rack, 'R-01', (ups, ups),
+                  where=(({'u': 5, 'face': 'rear'}, {'side_pos': 'rear-right'}) if tag == 'DR'
+                         else ({'u': 5, 'face': 'rear'}, {'u': 6, 'face': 'rear'})))
+    # With their depth, as the rest of the demo: without one the 3D drew them nearly as deep as
+    # the rack and the cables behind them had nowhere to be seen.
+    rtr = b.item(rack, 'RTR-' + tag, 'router', 40, model='router', depth_mm=450)
+    fw = b.item(rack, 'FW-' + tag, 'firewall', 38, model='firewall', depth_mm=450)
+    sw = b.item(rack, 'SW-' + tag, 'switch', 36, model='tor', depth_mm=450)
+    activos = [(rtr, 'router'), (fw, 'firewall'), (sw, 'switch')]
+    for it, role in activos:
         b.dual(it, role, pdus)
     b.cable(rtr, 'Gi0/1', fw, 'port1', color='red', length=1000)
     b.cable(fw, 'port2', sw, 'Gi1/0/1', color='red', length=1000)
     for k in range(2):
-        srv = b.item(rack, 'srv-dr-%02d' % (k + 1), 'server', 1 + 2 * k, 2, model='server')
+        srv = b.item(rack, 'srv-%s-%02d' % (tag.lower(), k + 1), 'server', 1 + 2 * k, 2,
+                     model='server', depth_mm=750)
         b.dual(srv, 'server', pdus)
         b.cable(srv, 'eth0', sw, 'Gi1/0/%d' % (k + 2), length=2000)
-    b.new('links', {'a_site': demo, 'b_site': site, 'a_item': net['rtr'], 'b_item': rtr,
+        activos.append((srv, 'server'))
+    for it, _role in activos:
+        label = str((b.s.items.get(it) or {}).get('label') or '')
+        estado, por = (trouble or {}).get(label, ('ok', ''))
+        b.s.items.update(it, {'demo_state': estado, 'demo_reason': w[por] if por else '',
+                              'description': w['demo_state_desc'] % w['state_' + estado]},
+                         actor=b.actor)
+    return {'rtr': rtr, 'fw': fw, 'sw': sw}
+
+
+def _dr(b: _Builder, demo: str, site: str, net: dict) -> None:
+    """The recovery centre, joined to Demo by TWO links for HA: the MPLS between the routers,
+    up, and the IPsec tunnel between the firewalls, down —FW-DR in error says why—, so the map
+    shows a link in error beside one that is fine."""
+    w = b.w
+    dr = _branch(b, site, 'DR', w['src_dr_ups'],
+                 trouble={'FW-DR': ('error', 'why_ipsec_down')})
+    b.new('links', {'a_site': demo, 'b_site': site, 'a_item': net['rtr'], 'b_item': dr['rtr'],
                     'kind': 'mpls', 'provider': w['link_mpls_provider'],
                     'circuit_id': 'MPLS-DEMO-0001', 'bandwidth_mbps': 1000,
                     'label': w['link_mpls']})
-    b.new('links', {'a_site': demo, 'b_site': site, 'kind': 'ipsec', 'provider': 'Internet',
+    b.new('links', {'a_site': demo, 'b_site': site, 'a_item': net['fws'][-1],
+                    'b_item': dr['fw'], 'kind': 'ipsec', 'provider': 'Internet',
                     'bandwidth_mbps': 300, 'path': 'internet', 'label': w['link_ipsec'],
                     'description': w['link_ipsec_desc']})
+
+
+def _far(b: _Builder, demo: str, texas: str, south_africa: str, taiwan: str,
+         net: dict) -> None:
+    """South Africa and Taiwan, the two ends of the map.
+
+    South Africa is **entirely offline**: every active item in error with the same reason, and
+    its only link —one MPLS to Madrid— down with them, so the map shows a whole site lost and
+    the board warns that it hung from a single link. Taiwan is fine and has two paths: an
+    international MPLS to Madrid and an SD-WAN to Texas."""
+    w = b.w
+    caido = ('error', 'why_site_offline')
+    za = _branch(b, south_africa, 'ZA', w['src_za_ups'],
+                 trouble={k: caido for k in ('RTR-ZA', 'FW-ZA', 'SW-ZA',
+                                             'srv-za-01', 'srv-za-02')})
+    tw = _branch(b, taiwan, 'TW', w['src_tw_ups'])
+    b.new('links', {'a_site': demo, 'b_site': south_africa, 'a_item': net['rtrs'][0],
+                    'b_item': za['rtr'], 'kind': 'mpls', 'provider': w['link_intl_provider'],
+                    'circuit_id': 'MPLS-DEMO-0003', 'bandwidth_mbps': 200,
+                    'label': w['link_za'], 'description': w['link_za_desc']})
+    b.new('links', {'a_site': demo, 'b_site': taiwan, 'a_item': net['rtrs'][0],
+                    'b_item': tw['rtr'], 'kind': 'mpls', 'provider': w['link_intl_provider'],
+                    'circuit_id': 'MPLS-DEMO-0004', 'bandwidth_mbps': 500,
+                    'label': w['link_tw'], 'description': w['link_tw_desc']})
+    b.new('links', {'a_site': texas, 'b_site': taiwan,
+                    'a_item': _site_router(b, texas), 'b_item': tw['rtr'], 'kind': 'sdwan',
+                    'provider': 'Internet', 'bandwidth_mbps': 200, 'path': 'internet',
+                    'label': w['link_tx_tw'], 'description': w['link_tx_tw_desc']})
+
+
+def _site_router(b: _Builder, site: str) -> str:
+    """The router of a small site (`_branch`), found by its label: the WAN links end there."""
+    for room in b.s.rooms_of(site):
+        for rack in b.s.racks_of(room['uid']):
+            for it in b.s.items_of(rack['uid']):
+                if str(it.get('label') or '').startswith('RTR-'):
+                    return it['uid']
+    return ''
+
+
+def _americas(b: _Builder, demo: str, texas: str, puerto_rico: str, net: dict) -> None:
+    """Texas and Puerto Rico, so the map holds a small WAN across the ocean: Demo - Texas by
+    international MPLS between routers (up), Texas - Puerto Rico by SD-WAN (in warning: RTR-PR
+    reports the latency)."""
+    w = b.w
+    tx = _branch(b, texas, 'TX', w['src_tx_ups'])
+    pr = _branch(b, puerto_rico, 'PR', w['src_pr_ups'],
+                 trouble={'RTR-PR': ('warning', 'why_sdwan_latency')})
+    b.new('links', {'a_site': demo, 'b_site': texas, 'a_item': net['rtrs'][-1],
+                    'b_item': tx['rtr'], 'kind': 'mpls', 'provider': w['link_intl_provider'],
+                    'circuit_id': 'MPLS-DEMO-0002', 'bandwidth_mbps': 500,
+                    'label': w['link_tx'], 'description': w['link_tx_desc']})
+    b.new('links', {'a_site': texas, 'b_site': puerto_rico, 'a_item': tx['rtr'],
+                    'b_item': pr['rtr'], 'kind': 'sdwan', 'provider': 'Internet',
+                    'bandwidth_mbps': 200, 'path': 'internet', 'label': w['link_tx_pr'],
+                    'description': w['link_tx_pr_desc']})

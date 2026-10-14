@@ -294,6 +294,20 @@ const sc = _dcr3dScene({rack: {uid: 'k', u_height: 10, width_mm: 600, depth_mm: 
 const caja = sc.cajas.find(k => k.lee && k.lee.uid === 'a');
 const primero = sc.cajas.find(k => k.cable);
 __out.sale = [primero.m[12] > caja.m[12] + caja.m[0] * 0.5, primero.m[14] < caja.m[14]];
+// A small site's rack (600 x 1000), its items with no depth of their own and a side strip:
+// the rear run and the channel went INSIDE the servers and the strip, and the rack looked
+// cableless. The run now goes behind the deepest thing in the rack.
+const pequeno = _dcr3dScene({rack: {uid: 'k2', u_height: 42, width_mm: 600, depth_mm: 1000},
+    items: [{uid: 'pdu', role: 'pdu', placement: 'side', u_height: 0},
+            {uid: 'sw', role: 'switch', u_start: 36, u_height: 1, face: 'full', placement: 'u'},
+            {uid: 's1', role: 'server', u_start: 1, u_height: 2, face: 'full', placement: 'u'},
+            {uid: 's2', role: 'server', u_start: 3, u_height: 2, face: 'full', placement: 'u'}]},
+    {redes: true, cables: {cables: [{a_item: 's1', a_port: 'eth0', b_item: 'sw', kind: 'copper'},
+                                    {a_item: 's2', a_port: 'eth0', b_item: 'sw', kind: 'copper'}]}});
+const fondoMax = Math.max(...pequeno.cajas.filter(k => !k.cable && k.lee
+    && ['pdu', 'sw', 's1', 's2'].includes(k.lee.uid)).map(k => k.m[14] + k.m[10]));
+__out.detras = pequeno.cajas.filter(k => k.cable && Math.abs(k.m[2]) < 1e-6
+                                          && k.m[14] > fondoMax).length;
 // The model form, in tabs: what it is, how it is outside, how it connects; and the ports tab
 // carries the placing editor for the model being edited.
 let __html = '';
@@ -534,6 +548,12 @@ class TestInTheRack:
         assert numero == {'f': 'rear', 'x': 0.8, 'y': 0.5}
         assert falta is None and sin is None
         assert psu2 == {'f': 'rear', 'x': 0.9, 'y': 0.4}
+
+    def test_in_a_small_rack_the_rear_run_goes_behind_everything(self, out):
+        """Reported on the demo's Puerto Rico rack: no cable in its 3D. Items with no depth of
+        their own are drawn nearly as deep as the rack, and the rear run, fixed at 13 cm from
+        the back, went through the servers — and the channel through the side strip."""
+        assert out['detras'] >= 4, out['detras']
 
     def test_the_point_on_its_face_and_the_cable_leaves_from_it(self, out):
         delante, detras = out['punto']

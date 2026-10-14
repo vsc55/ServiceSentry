@@ -865,6 +865,19 @@ function ss3dRay(V, clientX, clientY) {
 
 /** Where the pointer's ray cuts the level plane at height `y`, or `null` (no canvas, no
  *  pointer, or looking above the horizon). */
+/** What is under the pointer, in the scene: the first solid box its ray meets (a unit's face,
+ *  a wall, a floor), or else the ground at the height of the point looked at. */
+function _ss3dCursorPoint(V, ev) {
+    const c = V.cam;
+    if (V && V.cv && Number.isFinite(ev.clientX) && typeof ss3dPickBox === 'function') {
+        const rayo = ss3dRay(V, ev.clientX, ev.clientY);
+        const hit = rayo && ss3dPickBox(V, rayo, k => k.color && k.color[3] >= 0.5);
+        if (hit && hit.t > 0.05) return [rayo.o[0] + rayo.d[0] * hit.t, rayo.o[1] + rayo.d[1] * hit.t,
+                                         rayo.o[2] + rayo.d[2] * hit.t];
+    }
+    return c ? ss3dCursorGround(V, ev, c.mira[1]) : null;
+}
+
 function ss3dCursorGround(V, ev, y) {
     if (!V || !V.cv || !Number.isFinite(ev.clientX)) return null;
     const rayo = ss3dRay(V, ev.clientX, ev.clientY);
@@ -1014,10 +1027,15 @@ function ss3dWheel(V, ev) {
         c.radio = Math.max(0.5, c.radio * 0.89);
     }
     if (c.radio !== r0) {
-        const p = ss3dCursorGround(V, ev, c.mira[1]);
+        // Centred on what is under the pointer, in the three axes: the eye and the point looked
+        // at both move toward it by the same fraction, so it stays under the cursor. It was the
+        // ground at the height of the point looked at, and only across: in a rack seen from the
+        // front —an upright thing— the wheel never went up or down to the unit pointed at.
+        const p = _ss3dCursorPoint(V, ev);
         if (p) {
             const k = 1 - c.radio / r0;
-            ss3dShift(V, c, (p[0] - c.mira[0]) * k, 0, (p[2] - c.mira[2]) * k);
+            ss3dShift(V, c, (p[0] - c.mira[0]) * k, (p[1] - c.mira[1]) * k,
+                      (p[2] - c.mira[2]) * k);
         }
         return;
     }

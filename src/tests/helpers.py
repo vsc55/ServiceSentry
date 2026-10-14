@@ -121,6 +121,10 @@ const caja = {console, document: doc, navigator: {language: 'es', userAgent: 'no
                                 json: async () => ({}), text: async () => ''}),
   bootstrap: {Modal: {getOrCreateInstance: () => ({show() {}, hide() {}})},
               Tab: {getOrCreateInstance: () => ({show() {}})},
+              // `showToast` and the selectors built with `CSS.escape` run on Node 22 (CI), where
+              // the whole bundle executes; on an old Node the path never got there and these
+              // gaps went unseen.
+              Toast: {getOrCreateInstance: () => ({show() {}, hide() {}})},
               Tooltip: function () {},
               Offcanvas: function () { return {show() {}, hide() {}}; }},
   Chart: function () { return {destroy() {}, update() {}}; }, URLSearchParams, URL,
@@ -131,10 +135,16 @@ const caja = {console, document: doc, navigator: {language: 'es', userAgent: 'no
   performance: {now: () => 0}, crypto: {getRandomValues: (a) => a},
   MutationObserver: function () { return {observe() {}, disconnect() {}}; },
   ResizeObserver: function () { return {observe() {}, disconnect() {}}; },
-  IntersectionObserver: function () { return {observe() {}, disconnect() {}}; }};
+  IntersectionObserver: function () { return {observe() {}, disconnect() {}}; },
+  CSS: {escape: (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c)}};
 caja.window = caja; caja.globalThis = caja;
 vm.createContext(caja);
 const salida = {load: '', error: ''};
+// A rejected promise nobody handles ends the process from Node 15 on and was only a warning on
+// Node 12: the same probe died on CI and passed here. It is the probe's error on every Node.
+process.on('unhandledRejection', (e) => {
+  if (!salida.error) salida.error = 'unhandledRejection: ' + String(e && e.message || e);
+});
 try { vm.runInContext(js, caja, {filename: 'panel.js'}); }
 catch (e) { salida.load = String(e && e.message || e); }
 try {
@@ -173,7 +183,10 @@ def node_run(bundle_js: str, probe_js: str) -> dict:
             rutas[nombre] = os.path.join(tmp, nombre)
             with io.open(rutas[nombre], 'w', encoding='utf-8') as fh:
                 fh.write(texto)
-        r = subprocess.run(['node', rutas['arnes.js'], rutas['panel.js'], rutas['prueba.js']],
+        # `SS_NODE` picks the interpreter: CI runs Node 22, and a workstation may have an old one
+        # first on its PATH — on which part of the bundle never runs (see the harness).
+        nodo = os.environ.get('SS_NODE') or 'node'
+        r = subprocess.run([nodo, rutas['arnes.js'], rutas['panel.js'], rutas['prueba.js']],
                            capture_output=True, text=True, encoding='utf-8', timeout=120)
     assert r.returncode == 0, (r.stderr or '')[-2000:]
     out = json.loads([l for l in r.stdout.splitlines() if l.startswith('{')][-1])

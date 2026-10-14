@@ -416,7 +416,7 @@ def cmd_dcim_demo(ctx, args) -> int:
                           replace=bool(getattr(args, 'replace', False)))
     except demo.DemoError as exc:
         return _err(f"{exc} (use --replace to rebuild it, or --remove)")
-    counts = ', '.join(f"{k} {v}" for k, v in made.items() if k not in ('site', 'site_dr'))
+    counts = ', '.join(f"{k} {v}" for k, v in made.items() if k not in demo.UID_KEYS)
     return _ok(f"demo site '{demo.SITE}' created: {counts}")
 
 

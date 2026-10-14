@@ -301,7 +301,10 @@ function _dcPduRow(p) {
             </div>`}</td>
         <td class="ss-nowrap">${_dcPduSourceCell(p)}</td>
         <td>${_dcPduDeviceCell(p)}</td>
-        <td class="text-end">${_dcimMay('dcim_edit') ? `<button
+        <td class="text-end ss-nowrap">${_dcimMay('dcim_edit') ? `<button
+            class="btn btn-sm btn-secondary me-1" onclick="_dcPduEdit(${jsStr(p.uid)})"
+            title="${escAttr(t('dcim_pdu_edit'))}" aria-label="${escAttr(t('dcim_pdu_edit'))}"
+            ><i class="bi bi-pencil"></i></button><button
             class="btn btn-sm btn-warning" onclick="_dcPduDrop(${jsStr(p.uid)},${
                 jsStr(p.name)})"><i class="bi bi-trash"></i></button>` : ''}</td>
     </tr>`;
@@ -670,6 +673,142 @@ function _dcPduDrop(uid, nombre) {
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
         _dcPowerOpen();
     });
+}
+
+// ── A strip's own form ───────────────────────────────────────────────────────
+
+//: The strip open in its form, by uid; '' when none is.
+let _dcPduEd = '';
+
+/** A strip of the open rack, by uid, out of what `/power` answered. */
+function _dcPduRowOf(uid) {
+    return ((_dcPower || {}).pdus || []).find(p => String(p.uid) === String(uid)) || null;
+}
+
+/** The strip an item IS (`dc_pdu.item_uid`), or `null`. */
+function _dcPduOfItem(itemUid) {
+    if (!itemUid) return null;
+    return ((_dcPower || {}).pdus || []).find(p => String(p.item_uid || '') === String(itemUid))
+        || null;
+}
+
+/** Everything a strip is, in one form: name, branch, outlets, capacity, colour, source and
+ *  description. The list only had a colour picker, a source and a device in its cells, so the
+ *  outlets or the branch of a strip declared wrong could not be corrected anywhere — the route
+ *  took them and no screen sent them.
+ *
+ *  Opened from the strip's row and from the form of the item that IS the strip. The item's
+ *  form is left (`_dcimForm = null`): one dialog, one save, and a save that fails —fewer
+ *  outlets than are in use— says so without half of another form saved behind it. */
+async function _dcPduEdit(uid) {
+    if (!_dcimMay('dcim_edit')) return;
+    if (!_dcPduRowOf(uid)) await _dcPowerOpen();
+    const p = _dcPduRowOf(uid);
+    if (!p) return showToast(t('dcim_not_found'), 'warning');
+    _dcimForm = null;
+    _dcPduEd = String(uid);
+    const pw = _dcPower || {};
+    const ramas = pw.feed_kinds || ['a', 'b', 'none'];
+    const fuentes = pw.sources || [];
+    // The floor the outlets cannot go below: the highest one in use, and how many leads there are.
+    const minimo = Math.max(0, Number(p.used) || 0, ...(p.outlets_used || []).map(Number));
+    const propio = String(p.color_own || '');
+    const item = p.item_uid
+        ? (((_dcimRack || {}).items) || []).find(i => i.uid === p.item_uid) : null;
+    const caja = (rot, campo, ayuda) => `<label class="ss-fs-2 text-muted">${
+        ayuda ? _dcLabel(rot, ayuda) : esc(t(rot))}${campo}</label>`;
+    const cuerpo = `<div class="d-flex flex-column gap-2" data-dc-pdu-form>
+        <div class="d-flex flex-wrap gap-3 align-items-end">
+            ${caja('dcim_pdu_name', `<input id="dcpe-name" class="form-control form-control-sm"
+                style="max-width:16rem" value="${escAttr(p.name || '')}"
+                onkeydown="if(event.key==='Enter')_dcPduEditSave()">`)}
+            ${caja('dcim_branch', `<select id="dcpe-feed" class="form-select form-select-sm"
+                style="max-width:10rem">${ramas.map(f => `<option value="${escAttr(f)}"${
+                    f === p.feed ? ' selected' : ''}>${esc(_dcBranchWord(f))}</option>`).join('')}
+                </select>`)}
+            ${caja('dcim_pdu_outlets', `<input id="dcpe-outlets" type="number" min="${minimo}"
+                class="form-control form-control-sm ss-tabular" style="max-width:7rem"
+                value="${escAttr(String(p.outlets || 0))}">`, 'dcim_pdu_outlets_tt')}
+            ${caja('dcim_pdu_capacity', `<input id="dcpe-cap" type="number" min="0"
+                class="form-control form-control-sm ss-tabular" style="max-width:8rem"
+                value="${escAttr(String(p.capacity_w || 0))}">`)}
+        </div>
+        <div class="d-flex flex-wrap gap-3 align-items-end">
+            ${caja('dcim_pdu_color', `<span class="d-inline-flex align-items-center gap-2">
+                <input id="dcpe-color" type="color" class="form-control form-control-sm
+                    form-control-color" value="${escAttr(p.color || '#6c757d')}"
+                    oninput="document.getElementById('dcpe-colorb').checked=false">
+                <span class="form-check mb-0"><input id="dcpe-colorb" type="checkbox"
+                    class="form-check-input"${propio ? '' : ' checked'}>
+                    <span class="form-check-label">${esc(t('dcim_pdu_color_branch'))}</span></span>
+                </span>`)}
+            ${caja('dcim_col_source', `<select id="dcpe-src" class="form-select form-select-sm"
+                style="min-width:12rem;max-width:18rem">
+                <option value="">${esc(t('dcim_source_none'))}</option>${fuentes.map(f =>
+                    `<option value="${escAttr(f.uid)}"${f.uid === p.source_uid ? ' selected' : ''}>${
+                    esc(f.name)} · ${esc(t('dcim_source_' + (f.kind || 'panel')))}</option>`).join('')}
+                </select>`)}
+        </div>
+        ${caja('dcim_description', `<textarea id="dcpe-desc" class="form-control form-control-sm"
+            rows="2">${esc(p.description || '')}</textarea>`)}
+        ${item && !item.foreign ? `<div><button class="btn btn-sm btn-secondary"
+            onclick="_dcPduOpenItem(${jsStr(item.uid)})"><i class="bi bi-box-arrow-up-right me-1"></i>${
+            esc(t('dcim_pdu_open_item'))}</button></div>` : ''}
+    </div>`;
+    // The title goes in through `textContent` (`showHtmlModal`): the name needs no escaping.
+    const titulo = [t('dcim_pdu_edit'), p.name].filter(Boolean).join(' · ');
+    showHtmlModal(titulo, cuerpo, 'primary',
+        `<button class="btn btn-primary" onclick="_dcPduEditSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+/** From the strip's form to the item that IS the strip — the same dialog, the other form. */
+function _dcPduOpenItem(itemUid) {
+    _dcPduEd = '';
+    _dcimForm = null;
+    _dcimOpen('edit', 'item', '', itemUid);
+}
+
+/** Save the strip through its own route. A refusal (fewer outlets than are in use, a branch
+ *  that does not exist) leaves the form open with what was typed, and says why. */
+async function _dcPduEditSave() {
+    if (!_dcPduEd) return;
+    const v = (id) => String((document.getElementById(id) || {}).value ?? '');
+    const num = (id) => Math.max(0, Math.round(Number(v(id)) || 0));
+    const deRama = !!(document.getElementById('dcpe-colorb') || {}).checked;
+    const cuerpo = {
+        name: v('dcpe-name').trim(), feed: v('dcpe-feed'),
+        outlets: num('dcpe-outlets'), capacity_w: num('dcpe-cap'),
+        source_uid: v('dcpe-src'), description: v('dcpe-desc'),
+        // Empty = «its branch's colour», which follows the branch when it changes.
+        color: deRama ? '' : v('dcpe-color'),
+    };
+    const r = await _dcimSend('PUT', `/api/v1/dcim/pdus/${encodeURIComponent(_dcPduEd)}`, cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPduEd = '';
+    hideInfoModal();
+    showToast(t('dcim_pdu_saved'), 'success');
+    _dcPowerOpen();
+}
+
+/** In an item's form, the strip that item IS: what it is, said in one line, and the button to
+ *  its own form. A button and not the strip's fields inside the item's form: two records with
+ *  two routes and two sets of rules in one dialog with one «Save» is a save that half works —
+ *  the item stored and the strip refused — and nothing on screen says which half. */
+function _dcPduItemBlock(itemUid) {
+    const p = _dcPduOfItem(itemUid);
+    if (!p) return '';
+    return `<div class="alert alert-secondary py-2 px-3 mb-2 ss-fs-2 d-flex align-items-center
+                gap-2 flex-wrap" data-dc-pdu-block>
+        <i class="bi bi-plug"></i><span class="fw-semibold">${esc(t('dcim_pdu'))}</span>
+        <span class="badge fw-normal" style="background:${escAttr(p.color)};color:#fff">${
+            esc(_dcBranchWord(p.feed))}</span>
+        <span>${esc(tf('dcim_pdu_of_item', p.name || '', _dcBranchWord(p.feed),
+                      p.outlets || 0, p.free || 0))}</span>
+        ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary ms-auto"
+            onclick="_dcPduEdit(${jsStr(p.uid)})"><i class="bi bi-pencil me-1"></i>${
+            esc(t('dcim_pdu_edit'))}</button>` : ''}
+    </div>`;
 }
 
 /** Enchufar un equipo. Va a la primera regleta con toma libre de la rama que le FALTA — que es

@@ -211,7 +211,7 @@ class TestWhichWayThingsFace:
         it is worked from before it. A split on the wall blows down from up high: not counted."""
         store, _w, _floors = building
         malos = []
-        for site in (store.made['site'], store.made['site_dr']):
+        for site in (store.made[k] for k in demo.UID_KEYS):
             for room in store.rooms_of(site):
                 W, D = float(room.get('width_mm') or 0), float(room.get('depth_mm') or 0)
                 if not W:

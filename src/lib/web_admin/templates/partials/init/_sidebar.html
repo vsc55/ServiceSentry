@@ -5,6 +5,14 @@
    ================================================================ #}
 
 const _SB_MINI_KEY = 'ss_sidebar_mini';
+//: The "Customise menu" session (end of this file), or null outside it: what to put back on
+//: leaving (the mini rail, the groups that were folded). Declared up here because the flyouts
+//: below already ask for it.
+let _sbEditing = null;
+//: The order the server drew the menu in, captured (`_sbCaptureDefault`, end of this file)
+//: before anything moves: what "Reset order" goes back to, and what places an entry the saved
+//: order does not know.
+const _SB_DEFAULT = {top: [], groups: {}};
 const _sbIsMobile = () => window.matchMedia('(max-width: 767.98px)').matches;
 
 // Toggle: on mobile the same control opens/closes the off-canvas drawer; on desktop
@@ -67,7 +75,10 @@ function _closeSidebar() { document.getElementById('ss-layout')?.classList.remov
 // Close the mobile drawer after navigating to a section (the links are real navigations,
 // but the SPA tab toggles under Settings are not — close on any sidebar item click).
 document.getElementById('ss-sidebar')?.addEventListener('click', e => {
-    if (_sbIsMobile() && e.target.closest('.ss-sb-item')) _closeSidebar();
+    // Not the user button: it opens the user menu, which lives INSIDE the drawer — closing the
+    // drawer slid the menu off-screen with it, so on a phone the menu (My settings, Customise
+    // menu, Sign out) could not be reached at all.
+    if (_sbIsMobile() && e.target.closest('.ss-sb-item:not(.ss-sb-userbtn)')) _closeSidebar();
 });
 
 // Quick theme toggle for the user block — same persistence as the account modal
@@ -298,6 +309,9 @@ function _placeFlyout(wrap) {
 // through _openFlyout/_closeFlyout so at most ONE flyout is ever open — no CSS :hover racing
 // the class and leaving a menu visible with no pointer on it (which overlapped neighbours).
 function _openFlyout(wrap) {
+    // Arranging the menu ("Customise menu", below): a flyout opening on every hover would
+    // cover the very entries being dragged.
+    if (_sbEditing) return;
     document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(w => {
         if (w !== wrap) _closeFlyout(w);
     });
@@ -467,3 +481,278 @@ function _sbActivateFromLocation() {
     }
 }
 window.addEventListener('popstate', _sbActivateFromLocation);
+
+// ── The reader's own order of the menu ("Customise menu") ─────────────────────────────────
+// Two levels can be reordered: the first-level list (sections and the two groups, Catalogue
+// and System) and the entries inside each group. An entry never changes group: which group a
+// thing lives in is a declaration of the thing (`placement`), the group is revealed or hidden
+// by what it holds, and the two are run by different people — an entry dragged out of System
+// would carry a platform section into the registers' group, which the menu does not model.
+//
+// Stored per user on the server (`sidebar_order` in PUT /api/v1/users/me/preferences, served
+// back by /api/v1/me) as the entries' STABLE keys (`data-sb-key`), never their labels: the
+// labels are translated and the groups sorted by them, so the same order would mean a
+// different menu in another language.
+
+/** The order to draw a list in: the reader's *saved* keys, merged into the *defaults*.
+ *
+ *  Pure, so it can be pinned without a DOM. Three rules:
+ *  - a saved key that no longer exists (a section retired, a module removed) is ignored;
+ *  - a default key the saved order does not name (a new section, a module added later, a
+ *    permission granted later) goes right after its nearest default predecessor that is
+ *    already placed — or first, when it had none — so it lands where it would have been;
+ *  - a key never appears twice. Visibility is not this function's business: an entry the
+ *    reader cannot open keeps being hidden by the permission gate wherever it is drawn. */
+function _sbMergeOrder(defaults, saved) {
+    const def = Array.isArray(defaults) ? defaults : [];
+    const known = new Set(def);
+    const out = [];
+    (Array.isArray(saved) ? saved : []).forEach(k => {
+        if (known.has(k) && !out.includes(k)) out.push(k);
+    });
+    def.forEach((k, i) => {
+        if (out.includes(k)) return;
+        let at = 0;
+        for (let j = i - 1; j >= 0; j--) {
+            const p = out.indexOf(def[j]);
+            if (p >= 0) { at = p + 1; break; }
+        }
+        out.splice(at, 0, k);
+    });
+    return out;
+}
+
+function _sbTopList() { return document.querySelector('#ss-sidebar .ss-sb-list'); }
+function _sbGroupLists() { return [...document.querySelectorAll('#ss-sidebar [data-sb-group]')]; }
+function _sbKeyed(ul) { return ul ? [...ul.children].filter(li => li.dataset && li.dataset.sbKey) : []; }
+function _sbKeysOf(ul) { return _sbKeyed(ul).map(li => li.dataset.sbKey); }
+
+/** Put the keyed children of *ul* in the order of *keys*. Whatever is not keyed and comes
+ *  after them (the hidden Account trigger) stays after them. */
+function _sbReorder(ul, keys) {
+    if (!ul) return;
+    const byKey = new Map(_sbKeyed(ul).map(li => [li.dataset.sbKey, li]));
+    let seen = false, anchor = null;
+    for (const li of [...ul.children]) {
+        if (li.dataset && li.dataset.sbKey) seen = true;
+        else if (seen) { anchor = li; break; }
+    }
+    keys.forEach(k => { const li = byKey.get(k); if (li) ul.insertBefore(li, anchor); });
+}
+
+/** Draw the menu in *order* (the saved preference, or nothing for the default one). */
+function _sbApplyOrder(order) {
+    const o = (order && typeof order === 'object') ? order : {};
+    _sbReorder(_sbTopList(), _sbMergeOrder(_SB_DEFAULT.top, o.top));
+    _sbGroupLists().forEach(ul => {
+        const g = ul.dataset.sbGroup;
+        _sbReorder(ul, _sbMergeOrder(_SB_DEFAULT.groups[g] || [], (o.groups || {})[g]));
+    });
+}
+
+/** The order on screen now, in the shape the server stores — every keyed entry, the hidden
+ *  ones too: an entry hidden today (its module off) keeps the place it has for the day it
+ *  comes back. `null` when it is the default order, so saving that stores nothing. */
+function _sbCurrentOrder() {
+    const order = {top: _sbKeysOf(_sbTopList()), groups: {}};
+    _sbGroupLists().forEach(ul => { order.groups[ul.dataset.sbGroup] = _sbKeysOf(ul); });
+    const same = (a, b) => a.length === b.length && a.every((k, i) => k === b[i]);
+    const isDefault = same(order.top, _SB_DEFAULT.top)
+        && Object.keys(order.groups).every(g => same(order.groups[g], _SB_DEFAULT.groups[g] || []));
+    return isDefault ? null : order;
+}
+
+function _sbCaptureDefault() {
+    _SB_DEFAULT.top = _sbKeysOf(_sbTopList());
+    _SB_DEFAULT.groups = {};
+    _sbGroupLists().forEach(ul => { _SB_DEFAULT.groups[ul.dataset.sbGroup] = _sbKeysOf(ul); });
+}
+_sbCaptureDefault();
+
+function _sbVisible(li) {
+    return !!(li && li.dataset && li.dataset.sbKey && li.style.display !== 'none');
+}
+
+/** Move *li* one place up (dir < 0) or down among its VISIBLE siblings — a hidden entry is
+ *  stepped over, or the button would seem to do nothing. Returns whether it moved. */
+function _sbMove(li, dir) {
+    if (!li || !li.parentElement) return false;
+    const step = n => (dir < 0 ? n.previousElementSibling : n.nextElementSibling);
+    let sib = step(li);
+    while (sib && !_sbVisible(sib)) sib = step(sib);
+    if (!sib) return false;
+    li.parentElement.insertBefore(li, dir < 0 ? sib : sib.nextSibling);
+    return true;
+}
+
+/** The arrows of the first and last visible entry of each list can go nowhere: disabled,
+ *  so a keyboard user hears it instead of pressing a button that does nothing. */
+function _sbRefreshMoveButtons() {
+    [_sbTopList(), ..._sbGroupLists()].forEach(ul => {
+        const vis = _sbKeyed(ul).filter(_sbVisible);
+        vis.forEach((li, i) => {
+            const ctl = li.querySelector(':scope > .ss-sb-editctl');
+            if (!ctl) return;
+            ctl.querySelector('[data-sb-dir="-1"]').disabled = i === 0;
+            ctl.querySelector('[data-sb-dir="1"]').disabled = i === vis.length - 1;
+        });
+    });
+}
+
+function _sbLabelOf(li) {
+    const el = li.querySelector('.ss-sb-label');
+    return (el ? el.textContent : '').replace(/\s+/g, ' ').trim();
+}
+
+/** The controls of one entry in the editing mode: a grip to drag it by and the two arrows. */
+function _sbControlsHtml(li) {
+    const name = _sbLabelOf(li);
+    const btn = (dir, icon, key) =>
+        `<button type="button" class="btn btn-secondary btn-sm ss-sb-mv" data-sb-dir="${dir}"`
+        + ` title="${esc(tf(key, name))}" aria-label="${esc(tf(key, name))}">`
+        + `<i class="bi ${icon}"></i></button>`;
+    return `<span class="ss-sb-grip" title="${esc(tf('sb_order_drag', name))}" aria-hidden="true">`
+        + '<i class="bi bi-grip-vertical"></i></span>'
+        + btn(-1, 'bi-chevron-up', 'sb_order_up') + btn(1, 'bi-chevron-down', 'sb_order_down');
+}
+
+function _sbOrderEdit() {
+    if (_sbEditing) return;
+    const sb = document.getElementById('ss-sidebar');
+    const layout = document.getElementById('ss-layout');
+    if (!sb) return;
+    _sbEditing = {mini: !!(layout && layout.classList.contains('ss-mini')), folded: []};
+    // The labels are what is being arranged, so the icons-only rail opens for the duration;
+    // on a phone the drawer opens, since that is where the menu is.
+    if (layout) layout.classList.remove('ss-mini');
+    if (_sbIsMobile()) _openSidebar();
+    document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(_closeFlyout);
+    // A folded group's entries cannot be arranged: unfold it, WITHOUT the collapse events, so
+    // the remembered open/closed state is not overwritten by a mode that is just passing by.
+    _sbGroupLists().forEach(ul => {
+        if (!ul.classList.contains('show')) { _sbEditing.folded.push(ul); ul.classList.add('show'); }
+    });
+    sb.querySelectorAll('li[data-sb-key]').forEach(li => {
+        const ctl = document.createElement('span');
+        ctl.className = 'ss-sb-editctl';
+        ctl.innerHTML = _sbControlsHtml(li);
+        li.insertBefore(ctl, li.firstChild);
+        li.draggable = true;
+    });
+    sb.classList.add('ss-sb-editing');
+    const bar = document.getElementById('ss-sb-editbar');
+    if (bar) bar.hidden = false;
+    _sbRefreshMoveButtons();
+    const save = document.getElementById('ss-sb-order-save');
+    if (save) save.focus();
+}
+
+function _sbOrderExit() {
+    const sb = document.getElementById('ss-sidebar');
+    if (!_sbEditing || !sb) return;
+    sb.querySelectorAll('.ss-sb-editctl').forEach(el => el.remove());
+    sb.querySelectorAll('li[data-sb-key]').forEach(li => { li.draggable = false; });
+    sb.classList.remove('ss-sb-editing');
+    const bar = document.getElementById('ss-sb-editbar');
+    if (bar) bar.hidden = true;
+    _sbEditing.folded.forEach(ul => ul.classList.remove('show'));
+    const layout = document.getElementById('ss-layout');
+    if (_sbEditing.mini && layout && !_sbIsMobile()) layout.classList.add('ss-mini');
+    _sbEditing = null;
+}
+
+/** Leave without saving: the menu goes back to the order it had. */
+function _sbOrderCancel() {
+    _sbApplyOrder(currentUser ? currentUser.sidebar_order : null);
+    _sbOrderExit();
+}
+
+async function _sbOrderPut(order) {
+    const r = await apiPut('/api/v1/users/me/preferences', {sidebar_order: order});
+    if (!r || !r.ok) {
+        showToast((r && r.error) || t('sb_order_save_err'), 'danger');
+        return false;
+    }
+    if (currentUser) currentUser.sidebar_order = order;
+    return true;
+}
+
+async function _sbOrderSave() {
+    if (!_sbEditing) return;
+    if (!await _sbOrderPut(_sbCurrentOrder())) return;
+    _sbOrderExit();
+    showToast(t('sb_order_saved'), 'success');
+}
+
+function _sbOrderReset() {
+    showConfirmModal(t('sb_order_reset_confirm'), async () => {
+        if (!await _sbOrderPut(null)) return;
+        _sbApplyOrder(null);
+        _sbOrderExit();
+        showToast(t('sb_order_reset_done'), 'success');
+    });
+}
+
+(function _sbWireEditing() {
+    const sb = document.getElementById('ss-sidebar');
+    if (!sb) return;
+    // While arranging, the menu is not a menu: a click on an entry must not navigate, fold a
+    // group or collapse the rail. Captured at the WINDOW, the first stop of every click:
+    // Bootstrap registers its delegated handlers (tabs, collapse, dropdown) on the document in
+    // the capture phase, so a guard on the sidebar ran after the tab had already switched. The
+    // arrows are handled here too, for the same reason.
+    window.addEventListener('click', e => {
+        if (!_sbEditing || !(e.target.closest && e.target.closest('#ss-sidebar'))) return;
+        const mv = e.target.closest && e.target.closest('.ss-sb-mv');
+        if (mv) {
+            e.preventDefault(); e.stopPropagation();
+            const dir = Number(mv.dataset.sbDir);
+            _sbMove(mv.closest('li[data-sb-key]'), dir);
+            _sbRefreshMoveButtons();
+            // Focus follows the entry it moved; at an edge, the arrow that still goes somewhere.
+            const other = mv.parentElement.querySelector(`[data-sb-dir="${-dir}"]`);
+            (mv.disabled ? other : mv).focus();
+            return;
+        }
+        if (e.target.closest && e.target.closest('.ss-sb-nav, .ss-sb-brand, .ss-sb-user')) {
+            e.preventDefault(); e.stopPropagation();
+        }
+    }, true);
+    // Drag and drop, among the siblings of the entry dragged and nowhere else.
+    let dragged = null;
+    sb.addEventListener('dragstart', e => {
+        if (!_sbEditing) return;
+        const li = e.target.closest && e.target.closest('li[data-sb-key]');
+        if (!li) return;
+        dragged = li;
+        li.classList.add('ss-sb-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', li.dataset.sbKey); } catch (err) { /* ignore */ }
+        e.stopPropagation();
+    });
+    sb.addEventListener('dragover', e => {
+        if (!dragged) return;
+        let over = e.target.closest && e.target.closest('li[data-sb-key]');
+        while (over && over.parentElement !== dragged.parentElement) {
+            over = over.parentElement && over.parentElement.closest('li[data-sb-key]');
+        }
+        if (!over) return;                          // another list: not a place to drop
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (over === dragged) return;
+        const r = over.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        over.parentElement.insertBefore(dragged, after ? over.nextSibling : over);
+    });
+    sb.addEventListener('drop', e => { if (dragged) e.preventDefault(); });
+    sb.addEventListener('dragend', () => {
+        if (!dragged) return;
+        dragged.classList.remove('ss-sb-dragging');
+        dragged = null;
+        _sbRefreshMoveButtons();
+    });
+    // Escape leaves the mode as Cancel does.
+    document.addEventListener('keydown', e => {
+        if (_sbEditing && e.key === 'Escape' && !document.querySelector('.modal.show')) _sbOrderCancel();
+    });
+})();

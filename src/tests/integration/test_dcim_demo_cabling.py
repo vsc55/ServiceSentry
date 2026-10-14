@@ -31,7 +31,7 @@ def office(tmp_path_factory):
     db = get_connector(None, default_sqlite_path=str(path / 'data.db'))
     store = DcimStore(db)
     made = demo.build(store, var_dir=str(path))
-    rooms = [r for s in (made['site'], made['site_dr']) for r in store.rooms_of(s)]
+    rooms = [r for k in demo.UID_KEYS for r in store.rooms_of(made[k])]
     items = {i['uid']: i for r in rooms for i in store.items_in_room(r['uid'])}
     racked = {i['uid']: i for r in rooms for k in store.racks_of(r['uid'])
               for i in store.items_of(k['uid'])}

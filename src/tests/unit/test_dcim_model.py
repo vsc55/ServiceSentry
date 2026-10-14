@@ -216,7 +216,8 @@ class TestElRackCompartidoEsElCasoDuro:
         assert out == {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 12, 'u_height': 2,
                        'face': 'full', 'placement': None, 'parent_uid': None,
                        'u_slots': None, 'u_slot': None, 'u_slot_span': None,
-                       'u_split': None, 'foreign': True}
+                       'u_split': None, 'side_pos': None, 'side_slot': None,
+                       'foreign': True}
 
     def test_conserva_su_geometria_entera(self):
         """Dónde está y cuánto ocupa, entero: sin `placement` un SAI en el suelo salía en la

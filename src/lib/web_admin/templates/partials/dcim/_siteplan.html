@@ -322,6 +322,29 @@ function _dcsThing(kind, x, room) {
                onpointerleave="_dcsFloatLater()"`});
 }
 
+/** El rótulo de una sala, a la medida de su ancho.
+ *
+ *  El tamaño salía solo del lado corto de la sala, sin mirar el nombre: «Sala de reuniones
+ *  Atlántico» en una sala de siete metros medía el doble que la sala y se montaba sobre las de
+ *  al lado. Ahora el texto encoge hasta caber en el 90 % del ancho (el ancho de un carácter se
+ *  estima en 0,5 del cuerpo: medido en el navegador, los nombres ocupaban un 70-79 % con 0,58); si ni con el mínimo legible
+ *  cabe, se recorta con «…» — el nombre entero sigue en el `<title>` de la sala.
+ *
+ *  @returns `{tam, texto}`: el cuerpo y el texto a pintar. */
+function _dcsFitName(name, w, tam) {
+    const texto = String(name || '');
+    const ancho = (n, s) => n * s * 0.5;
+    const sitio = w * 0.9;
+    if (!texto || ancho(texto.length, tam) <= sitio) return {tam, texto};
+    // El mínimo, 4.5: con 3 un nombre recortado medía 5 px en pantalla y no se leía sin
+    // acercar. Más vale «…» legible que el nombre entero ilegible.
+    const minimo = Math.min(tam, 4.5);
+    const cabe = sitio / (texto.length * 0.5);
+    if (cabe >= minimo) return {tam: cabe, texto};
+    const n = Math.max(1, Math.floor(sitio / (minimo * 0.5)) - 1);
+    return {tam: minimo, texto: texto.slice(0, n) + '…'};
+}
+
 /** Una sala en la planta: su caja a tamaño real, girada sobre su centro como un rack en una
  *  sala, con su nombre y su medida. A trazos si no tiene medidas: está, pero su tamaño es un
  *  supuesto y no debe leerse como dato.
@@ -337,7 +360,13 @@ function _dcsRoom(r) {
     const rot = Number(r.rotation) || 0;
     const puesto = _dcsSel === r.uid;
     const tone = (r.roll || {}).state ? deviceStateColor(r.roll.state) : 'var(--bs-info)';
-    const tam = Math.min(12, Math.max(4, Math.min(w, d) * 0.16));
+    const base = Math.min(12, Math.max(4, Math.min(w, d) * 0.16));
+    const rotulo = _dcsFitName(r.name, w, base);
+    const tam = rotulo.tam;
+    // La medida, con su propio ajuste: no encoge porque el nombre haya encogido.
+    const medida = _dcsFitName(sz.real ? `${(sz.w / 1000).toFixed(1)} × ${(sz.d / 1000).toFixed(1)} m`
+                                       : t('dcim_room_no_size'), w,
+                                Math.min(base * 0.6, tam * 0.8));   // nunca mayor que el nombre
     return `<g class="ss-grab${_dcsIsBack('room', '', r.uid) ? ' ss-dcp-back' : ''}" data-dcs="${escAttr(r.uid)}"
                transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
                onpointerenter="_dcsFloatShow('room',${jsStr(r.uid)},'',this)"
@@ -349,12 +378,11 @@ function _dcsRoom(r) {
               vector-effect="non-scaling-stroke"></rect>
         <text x="${x + w / 2}" y="${y + d / 2}" font-size="${tam}" text-anchor="middle"
               fill="var(--bs-body-color)" stroke="var(--bs-body-bg)" stroke-width="${tam * 0.22}"
-              paint-order="stroke" style="pointer-events:none">${esc(r.name || '')}</text>
-        <text x="${x + w / 2}" y="${y + d / 2 + tam * 1.1}" font-size="${tam * 0.6}"
+              paint-order="stroke" style="pointer-events:none">${esc(rotulo.texto)}</text>
+        <text x="${x + w / 2}" y="${y + d / 2 + tam * 0.55 + medida.tam * 0.9}" font-size="${medida.tam}"
               text-anchor="middle" fill="var(--bs-body-color)" stroke="var(--bs-body-bg)"
-              stroke-width="${tam * 0.15}" paint-order="stroke" style="pointer-events:none">${
-              esc(sz.real ? `${(sz.w / 1000).toFixed(1)} × ${(sz.d / 1000).toFixed(1)} m`
-                          : t('dcim_room_no_size'))}</text>
+              stroke-width="${medida.tam * 0.25}" paint-order="stroke" style="pointer-events:none">${
+              esc(medida.texto)}</text>
         ${puesto ? `<rect x="${x - 1}" y="${y - 1}" width="${w + 2}" height="${d + 2}" fill="none"
             stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
             vector-effect="non-scaling-stroke"></rect>` : ''}

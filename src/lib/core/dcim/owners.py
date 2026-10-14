@@ -60,7 +60,7 @@ def opaque(item) -> dict:
     # `parent_uid` a box mounted on a tray was drawn a second time on top of it; without the
     # slot fields half a U was drawn as a whole one — an elevation that lies about what is free.
     keep = ('uid', 'rack_uid', 'u_start', 'u_height', 'face', 'placement', 'parent_uid',
-            'u_slots', 'u_slot', 'u_slot_span', 'u_split')
+            'u_slots', 'u_slot', 'u_slot_span', 'u_split', 'side_pos', 'side_slot')
     out = {k: item.get(k) for k in keep}
     out['foreign'] = True
     return out

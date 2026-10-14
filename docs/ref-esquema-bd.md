@@ -118,7 +118,7 @@ erDiagram
 | enabled | INTEGER | no | `1` | |
 | auth_source | TEXT | no | `'local'` | |
 | must_change_password | INTEGER | no | `0` | `1` = el próximo inicio de sesión exige cambiar la contraseña (admin inicial con la contraseña por defecto) |
-| extra | TEXT | no | `'{}'` | JSON (overflow: preferencias, `table_config`, `landing_page`…) |
+| extra | TEXT | no | `'{}'` | JSON (overflow: preferencias, `table_config`, `landing_page`, `sidebar_order` —el orden propio del menú lateral: `{top: [claves], groups: {grupo: [claves]}}`—…) |
 | created_at | TEXT | no | `''` | |
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
@@ -1313,6 +1313,8 @@ nunca borra un armario que tenga algo dentro.
 | group_uid | TEXT | no | `''` | grupo con el que se mueve junto en el plano de la sala o la planta: un id opaco compartido (`g-` y letras); vacío = sin grupo. El servidor rechaza lo que no case con `^[A-Za-z0-9_-]{0,64}$` |
 | jacks | TEXT | no | `''` | una roseta o una toma de corriente de pared (`JACK_ROLES`): sus bocas, una lista en JSON `[{"connector": "8p8c", "n": 2}, …]` — cada una un id del catálogo de conectores de su clase (`connectors.jacks`: cobre, fibra y vídeo en una roseta; corriente en una toma) y cuántas, un entero desde 1 sin máximo. El mismo conector dos veces se junta en uno. Vacío = sin decir |
 | source_uid | TEXT | no | `''` | una toma de corriente: la fuente de la que cuelga → `dc_source.uid` (SAI, grupo, cuadro, acometida), de la misma sede que su sala. Borrar la fuente la deja vacía |
+| side_pos | TEXT | no | `''` | lo de 0U (`placement = 'side'`, una regleta vertical): en qué canal trasero va, **mirando el armario por detrás** — `rear-left` \| `rear-right` (`SIDE_POSITIONS`). Vacío = automático, la regla de siempre: la primera a la izquierda, la segunda a la derecha, alternando; lo anterior a esta columna se dibuja igual. Una regleta horizontal no lo usa: ocupa su U y su cara (`face`) como cualquier equipo. Al dejar de estar en el lateral se vacía |
+| side_slot | INTEGER | no | `0` | su orden en ese canal si comparte lado con otra: `0` la de fuera (pegada al lateral), `1` la de dentro (junto al mástil). Dos que piden el mismo sitio no se pisan en el dibujo: la segunda pasa hacia dentro |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
