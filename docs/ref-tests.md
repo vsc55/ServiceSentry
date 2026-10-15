@@ -11991,3 +11991,9 @@ Las seis sedes de la demo (Demo, Respaldo, Texas, Puerto Rico, Sudáfrica y Taiw
 **Archivo:** `tests/integration/test_wa_sidebar_order.py` — 23 tests
 
 Guardar, leer y restablecer el orden (`sidebar_order` en las preferencias del usuario), auditoría, validación con 400 (formato de clave, topes de tamaño) sin aplicar nada a medias, sin sesión no se escribe y cada usuario solo escribe el suyo. En `node`: las reglas de mezcla (una entrada nueva cae tras su vecina por defecto, las claves retiradas se ignoran, lo oculto sigue oculto), el menú redibujado en el orden guardado, el orden por defecto se guarda como vacío, las flechas saltan lo oculto y se paran en el borde, y los controles de edición. También que el clic en modo edición no navega y que en el móvil el botón de usuario no cierra el cajón.
+
+## 257. DCIM — Edición de regletas (PDU) en el alzado
+
+**Archivo:** `tests/integration/test_wa_dcim_pdu_edit.py` — 22 tests
+
+El formulario de la regleta guarda todos los campos, un color vacío es el de su rama y se rechaza con 400 dejar menos tomas que la más alta en uso (las acometidas sin número cuentan sin subir ese mínimo). En `node`: tras cerrar un diálogo por su X, «Cerrar» o Esc el siguiente clic abre a la primera; no se captura el puntero al pulsar ni con un temblor, solo en un arrastre real; un clic espera a un posible segundo, y el doble clic abre las piezas y no el formulario; el formulario tiene todos los campos, guarda por la ruta de regletas y mantiene el error a la vista; la fila lleva un lápiz sólido; las regletas 0U salen con el color de su rama, más anchas, también junto al frontal y dentro del dibujo; y la lista bajo el alzado vuelve a incluir lo 0U.

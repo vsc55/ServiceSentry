@@ -8,6 +8,38 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.147] - 2026-10-15
+
+### Added
+
+- **A power strip's own settings can be edited.** Its row under the elevation only offered
+  colour, source, device and delete; a form now edits every field, opened from the row (solid
+  pencil) or from the item that is the strip. Asking for fewer outlets than the highest one in
+  use is refused by the server, with the reason shown in the form; unnumbered leads count
+  without raising that floor.
+- **0U strips are listed again under the elevation,** with the other things that take no U.
+
+### Fixed
+
+- **A click after closing a DCIM form did nothing.** `_dcimOpen` toggles, and closing the dialog
+  by its X, «Close» or Escape did not forget the open form, so the next click on the same thing
+  closed what was already closed.
+- **Nothing in a U of the elevation opened with a click.** The pointer was captured on press,
+  and Chromium then sends the click to the `<svg>`, not the item; capture now waits for a real
+  drag. A single click waits a moment for a second one, so a double click opens the parts and
+  not the form.
+- **Vertical strips were nearly invisible.** An 11 px outline in the device's state colour, only
+  beside the rear face; now wider, in their branch colour, and also beside the front, faded and
+  mirrored.
+
+### Tests
+
+- `tests/integration/test_wa_dcim_pdu_edit.py`: the strip form saves every field and refuses
+  fewer outlets than are in use; in `node`, the click after closing a dialog, no pointer capture
+  on a press or a tremble, click versus double click, the strip form and its row, the strips'
+  colour and width, and the 0U list. It was committed in build.146 without its entry in
+  `docs/ref-tests.md`, which failed the inventory guard in CI.
+
 ## [0.0.1+build.146] - 2026-10-12
 
 ### Added
