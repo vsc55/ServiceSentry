@@ -187,3 +187,54 @@ class BrandStore(BaseStore):
             if campo in data or not parcial:
                 fuera[campo] = str(data.get(campo) or '').strip()
         return fuera
+
+
+def usage(store, cat, said, allowed) -> dict:
+    """``{brand_uid: {items, models, racks, sites}}`` — what of each brand is installed.
+
+    **Counted over what the caller may see**, as every count in the inventory is: a brand that
+    shows «14 in use» of which none are yours is somebody else's fleet enumerated through the
+    catalogue. The rule is the inventory's (`owners.owner_of` over the item's chain, innermost
+    wins); the chain is built here from three maps read once, instead of `chain_of` per item,
+    which is three reads per item for a screen that lists all of them.
+
+    One read of the items that name a model, one of the brands of those models, and the site
+    tree — not a query per brand.
+    """
+    from lib.core.dcim import owners as dcim_owners                     # noqa: PLC0415
+    if store is None or cat is None:
+        return {}
+    rack_room, room_site = {}, {}
+    for sitio in store.sites.list():
+        for sala in store.rooms_of(sitio['uid']):
+            room_site[str(sala['uid'])] = str(sitio['uid'])
+            for r in store.racks_of(sala['uid']):
+                rack_room[str(r['uid'])] = str(sala['uid'])
+    items = store.items.list("type_uid <> ''")
+    de_marca = cat.brands_of(it.get('type_uid') for it in items)
+    out: dict = {}
+    for it in items:
+        marca = de_marca.get(str(it.get('type_uid') or ''))
+        if not marca:
+            continue
+        rack = str(it.get('rack_uid') or '')
+        sala = rack_room.get(rack, '') if rack else str(it.get('room_uid') or '')
+        cadena = [('item', str(it['uid']))]
+        if rack:
+            cadena.append(('rack', rack))
+        if sala:
+            cadena.append(('room', sala))
+        if room_site.get(sala):
+            cadena.append(('site', room_site[sala]))
+        if not dcim_owners.may_see(dcim_owners.owner_of(cadena, said), allowed):
+            continue
+        u = out.setdefault(marca, {'items': 0, 'models': set(), 'racks': set(),
+                                   'sites': set()})
+        u['items'] += 1
+        u['models'].add(str(it.get('type_uid')))
+        if rack:
+            u['racks'].add(rack)
+        if room_site.get(sala):
+            u['sites'].add(room_site[sala])
+    return {m: {'items': u['items'], 'models': len(u['models']), 'racks': len(u['racks']),
+                'sites': len(u['sites'])} for m, u in out.items()}

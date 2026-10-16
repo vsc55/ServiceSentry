@@ -7,7 +7,7 @@ plataforma es con lo que sale un equipo. Se leen mucho y se escriben poco.
 
 Rutas:
 
-    GET     /api/v1/dcim/brands
+    GET     /api/v1/dcim/brands[?usage=1]
     POST    /api/v1/dcim/brands
     PUT     /api/v1/dcim/brands/<uid>
     DELETE  /api/v1/dcim/brands/<uid>
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
+from lib.core.dcim import brands as dcim_brands
 from lib.core.dcim import platforms as dcim_platforms
 from lib.core.dcim import profiles as dcim_profiles
 
@@ -156,8 +157,27 @@ def register(app, wa, C):
         if brands is None:
             return jsonify({'brands': []})
         cuentas = cat.brand_counts() if cat else {}
-        return jsonify({'brands': [dict(m, models=cuentas.get(str(m['uid']), 0))
-                                   for m in brands.list()]})
+        # Por forma —dispositivo, módulo, armario, componente—, de una sola consulta.
+        formas = cat.brand_tree_counts() if cat else {}
+        # Y las plataformas: también son catálogo de una marca, y hay marcas que sólo hacen eso.
+        sistemas = C.platforms().brand_counts() if C.platforms() else {}
+        # Lo instalado, sólo si se pide y sólo a quien puede ver el inventario: esto se lee con
+        # el permiso del CATÁLOGO, y contar equipos colocados es contestar sobre el inventario.
+        uso, con_uso = {}, False
+        if request.args.get('usage') and 'dcim_view' in C.perms():
+            store = C.store()
+            uso = dcim_brands.usage(store, cat, store.owners_map() if store else {}, C.seen())
+            con_uso = True
+        vacio = {'items': 0, 'models': 0, 'racks': 0, 'sites': 0}
+        filas = []
+        for m in brands.list():
+            uid = str(m['uid'])
+            fila = dict(m, models=cuentas.get(uid, 0), trees=formas.get(uid, {}),
+                        platforms=sistemas.get(uid, 0))
+            if con_uso:
+                fila['in_use'] = uso.get(uid, vacio)
+            filas.append(fila)
+        return jsonify({'brands': filas, 'usage': con_uso})
 
     @app.route('/api/v1/dcim/brands', methods=['POST'])
     @C.catalog_manage_req

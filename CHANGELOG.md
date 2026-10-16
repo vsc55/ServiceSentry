@@ -8,6 +8,51 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.148] - 2026-10-15
+
+### Added
+
+- **The Brands tab has two more views beside the table.** A switcher like the Models tab's
+  own (same buttons, and the view kept in the address as `bview`, so a reload or a shared link
+  reopens it) adds «In use in the installation» — the brands with placed devices, how many,
+  how many distinct models and in how many racks and sites — and «By model type» — each brand
+  folded open into its devices, modules, racks, components **and platforms**, every line a
+  click through to those models (brand and tree) or to the Platforms tab narrowed to that
+  brand by its uid. A brand that only makes platforms is listed too.
+- **`GET /api/v1/dcim/brands` says what each brand has.** Every row carries `trees` (its models
+  per tree, one `GROUP BY`) and `platforms` (its platform count, one more); `?usage=1` adds
+  `in_use` with `items`, `models`, `racks` and `sites`, **counted over what the caller may
+  see** under the inventory's company boundary, and only for a caller holding `dcim_view` —
+  the list is read with the catalogue's permission, and placed items are the inventory's. The
+  answer says whether the counts came (`usage`).
+- **The Platforms tab can be narrowed to one brand**, by uid and shown as a chip that clears
+  it; «select all» marks only what that filter shows.
+
+### Changed
+
+- **Catalogue › Models is now Catalogue › Library.** The page holds brands, platforms,
+  connectors, schemas and the import besides the models, and «Models» named only one of its
+  tabs; the tab inside keeps that name. The section's id (`models`) is unchanged, so links and
+  saved sidebar orders still hold; the two catalogue permission descriptions name the new title.
+- **The Brands tab is the panel's standard list table.** It was a hand-built table: fixed
+  headers, no column chooser, no sorting, no pages. It is now `createListTable` like its
+  sibling Templates — sortable, reorderable and resizable columns, top and bottom pagination,
+  the factory's filter bar (name, description or account), the shared UID / created / updated
+  / updated-by columns hidden by default, a «Platforms» count column of its own beside
+  «Models», and the layout remembered per user under the key `dcbrd` (listed in the account's
+  Customisations). Row click, «New brand», edit and delete for `dcim_catalog_manage`, and the
+  empty state (which keeps the card and its «New brand» button) behave as before.
+
+### Tests
+
+- **`test_wa_dcim_brands_table.py` and `test_wa_dcim_brands_views.py`** drive the panel's own
+  script in Node: the table's registration, columns, numeric sorts, pages, row click, actions
+  only with the manage permission, filter and empty state; the switcher and its address; both
+  views, the platforms line and the Platforms tab's brand filter. Through the app, the brands
+  API's per-tree, platform and usage counts, including that another company's devices are not
+  counted and that no counts come without `dcim_view`. The new SQL also runs on live MariaDB and
+  PostgreSQL (`test_db_portability_live.py`). Every assertion was mutation-checked.
+
 ## [0.0.1+build.147] - 2026-10-15
 
 ### Added

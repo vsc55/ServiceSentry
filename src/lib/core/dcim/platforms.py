@@ -104,6 +104,18 @@ class PlatformStore(BaseStore):
             'ORDER BY LOWER(name), LOWER(version)') or ()
         return [self._row(r) for r in rows]
 
+    def brand_counts(self) -> dict:
+        """Cuántas plataformas tiene cada fabricante, por su uid. De una sola consulta.
+
+        Una marca que sólo hace sistemas —la del sistema operativo, la de la distribución— no
+        tiene ningún modelo en el catálogo y sí es parte de él: sin esta cuenta, la vista de las
+        marcas por tipo la dejaba fuera como si no existiera.
+        """
+        rows = self._db.fetchall(
+            f'SELECT brand_uid, COUNT(*) FROM {self._sql_table} '
+            "WHERE brand_uid <> '' GROUP BY brand_uid") or ()
+        return {str(r[0]): int(r[1]) for r in rows}
+
     def get(self, uid: str) -> dict | None:
         rows = self._db.fetchall(
             f'SELECT {", ".join(self._COLS)} FROM {self._sql_table} WHERE uid = ?',

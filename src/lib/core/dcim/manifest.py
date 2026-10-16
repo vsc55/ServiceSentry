@@ -44,7 +44,7 @@ MODULE_PERMISSIONS = [{
         {'flag': 'dcim_cable_edit', 'roles': ('editor',)},
     ),
 }, {
-    'group': 'perm_group_dcim_catalog',   # Catálogo › Modelos y Plantillas
+    'group': 'perm_group_dcim_catalog',   # Catalogue › Library and Templates
     'order': 47,
     'permissions': (
         # The catalogue of models. Both roles: it is a reference book about equipment in

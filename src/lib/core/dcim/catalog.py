@@ -746,6 +746,38 @@ class CatalogStore(BaseStore):
             f"WHERE brand_uid <> '' GROUP BY brand_uid") or ()
         return {str(r[0]): int(r[1]) for r in rows}
 
+    def brand_tree_counts(self) -> dict:
+        """``{brand_uid: {tree: n}}`` — each brand's models split by what they are.
+
+        One `GROUP BY` over two plain columns, which reads the same on the three engines: the
+        brands tab draws every brand with its four counts, and asking brand by brand would be
+        three hundred queries for one screen.
+        """
+        rows = self._db.fetchall(
+            f'SELECT brand_uid, tree, COUNT(*) FROM {self._sql_table} '
+            f"WHERE brand_uid <> '' GROUP BY brand_uid, tree") or ()
+        out: dict = {}
+        for r in rows:
+            out.setdefault(str(r[0]), {})[str(r[1] or 'device-types')] = int(r[2])
+        return out
+
+    def brands_of(self, type_uids) -> dict:
+        """``{type_uid: brand_uid}`` for the given models, in chunks of a few hundred.
+
+        Chunked because an `IN` of eight thousand placeholders is past what some engines take
+        in one statement; a model without a brand is simply left out.
+        """
+        uids = sorted({str(u) for u in (type_uids or ()) if u})
+        out: dict = {}
+        for i in range(0, len(uids), 500):
+            trozo = uids[i:i + 500]
+            marcas = ', '.join('?' for _ in trozo)
+            rows = self._db.fetchall(
+                f'SELECT uid, brand_uid FROM {self._sql_table} '
+                f"WHERE uid IN ({marcas}) AND brand_uid <> ''", tuple(trozo)) or ()
+            out.update({str(r[0]): str(r[1]) for r in rows})
+        return out
+
     def backfill_kinds(self) -> int:
         """Clasificar lo que se importó antes de que existiera la columna. Devuelve cuántas.
 

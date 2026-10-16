@@ -163,6 +163,7 @@ function _dcimRenderApart(cual) {
     if (cual === 'models') {
         if (!_dcCat) return _dcCatOpen();
         pane.innerHTML = _dcCatHtml();
+        if (typeof _dcBrandsMount === 'function') _dcBrandsMount();     // Marcas: su tabla
         return;
     }
     if (!_dcBuilds) return _dcBuildsOpen();

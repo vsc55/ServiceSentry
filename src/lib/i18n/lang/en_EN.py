@@ -4520,8 +4520,8 @@ LANG = {
     'dcim_view': 'See where the equipment is: sites, rooms, racks and what fills each U, with the maps and the elevations; and Catalogue › Templates, which the equipment form picks from. It is the read somebody does while walking, and it opens nothing of the registry — addresses and credentials stay behind “View devices”.',
     'dcim_edit':             'Create and move sites, rooms, racks and items: tidying the cabinet. It decides whose nothing is — that is “Decide which company owns what” — and it does not touch the device registry.',
     'dcim_cable_edit':       'Declare which cable joins what to what, with its label. It is writing down what somebody did with their hands; the panel then checks it against what LLDP sees.',
-    'dcim_catalog_view': 'See Catalogue › Models: the equipment models (height in U, depth, ports, power inlets) and their brands, platforms and connectors. It is a reference book about equipment in general and says nothing about this installation.',
-    'dcim_catalog_manage': 'Create, edit and import in Catalogue › Models: models, brands, platforms, connectors and schemas. Importing fetches several thousand files, runs for minutes and replaces what every elevation is drawn from — which is why it is not granted to “viewer”.',
+    'dcim_catalog_view': 'See Catalogue › Library: the equipment models (height in U, depth, ports, power inlets) and their brands, platforms and connectors. It is a reference book about equipment in general and says nothing about this installation.',
+    'dcim_catalog_manage': 'Create, edit and import in Catalogue › Library: models, brands, platforms, connectors and schemas. Importing fetches several thousand files, runs for minutes and replaces what every elevation is drawn from — which is why it is not granted to “viewer”.',
     'dcim_build_edit': 'Write the purchase standards in Catalogue › Templates: what “a datacenter server” means here, with its memory, its disks and its cards. Its own flag because DECIDING what gets bought and PUTTING a box in a U are done by different people, and with a single flag whoever racks equipment rewrites what the company buys.',
         'sessions_view':   'View the list of active login sessions.',
         'sessions_revoke': 'Revoke active sessions, forcing re-login.',
@@ -5638,6 +5638,22 @@ LANG = {
     'dcim_brand_account':        'Account no.',
     'dcim_brand_open':           'Open',
     'dcim_brand_none':           'No brands yet.',
+    'dcim_brand_v_table':        'Table',
+    'dcim_brand_v_usage':        'In use in the installation',
+    'dcim_brand_v_trees':        'By model type',
+    'dcim_brand_q_none':         'No brand matches the filter.',
+    'dcim_brand_use_items':      'Devices',
+    'dcim_brand_use_models':     'Distinct models',
+    'dcim_brand_use_racks':      'Racks',
+    'dcim_brand_use_sites':      'Sites',
+    'dcim_brand_use_intro':
+        'The brands with devices placed, counting only the ones you can see.',
+    'dcim_brand_use_none':       'No placed devices of any brand that you can see.',
+    'dcim_brand_use_noperm':
+        'Seeing what is installed needs the permission to view the inventory.',
+    'dcim_brand_trees_intro':
+        "Each brand's models, by what they are. Click a line to see those models.",
+    'dcim_brand_trees_none':     'No brand has models in the catalogue.',
     'dcim_brand_intro':
         'They are created on their own when the catalogue is imported. What gets '
         'typed here is what no library carries.',
@@ -7305,7 +7321,7 @@ LANG = {
     'infra_registry': 'Configure this device',
     'infra_coverage_none':     'The device registry is not visible to you here, or none matches.',
     'tab_devtypes':            'Device types',
-    'tab_models':              'Models',
+    'tab_models':              'Library',
     'infra_tab_place':         'Location',
     'infra_tab_config':        'Configuration',
     'infra_place_none':        'This device is not placed in any rack of the inventory.',

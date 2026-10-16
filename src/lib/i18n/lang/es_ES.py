@@ -4523,8 +4523,8 @@ LANG = {
     'dcim_view': 'Ver dónde está el equipamiento: sedes, salas, racks y qué ocupa cada U, con los mapas y los alzados; y Catálogo › Plantillas, de donde el formulario de un equipo elige una. Es la lectura que se hace andando, y no abre nada del registro — direcciones y credenciales siguen tras «Ver dispositivos».',
     'dcim_edit':             'Crear y mover sedes, salas, racks e items: ordenar el armario. No decide de quién es nada —eso es «Decidir de qué empresa es cada cosa»— ni toca el registro de dispositivos.',
     'dcim_cable_edit':       'Declarar qué cable une qué con qué, con su etiqueta. Es apuntar lo que alguien hizo con las manos; el panel contrasta después lo declarado con lo que ve LLDP.',
-    'dcim_catalog_view': 'Ver Catálogo › Modelos: los modelos de equipo (altura en U, profundidad, puertos, tomas), sus marcas, plataformas y conectores. Es un libro de referencia sobre equipamiento en general: no dice nada de esta instalación.',
-    'dcim_catalog_manage': 'Crear, editar e importar en Catálogo › Modelos: modelos, marcas, plataformas, conectores y esquemas. Importar trae varios miles de ficheros, tarda minutos y reemplaza aquello con lo que se dibuja cada alzado — por eso no se concede a «viewer».',
+    'dcim_catalog_view': 'Ver Catálogo › Biblioteca: los modelos de equipo (altura en U, profundidad, puertos, tomas), sus marcas, plataformas y conectores. Es un libro de referencia sobre equipamiento en general: no dice nada de esta instalación.',
+    'dcim_catalog_manage': 'Crear, editar e importar en Catálogo › Biblioteca: modelos, marcas, plataformas, conectores y esquemas. Importar trae varios miles de ficheros, tarda minutos y reemplaza aquello con lo que se dibuja cada alzado — por eso no se concede a «viewer».',
     'dcim_build_edit': 'Escribir en Catálogo › Plantillas los estándares de compra: qué es «un servidor de CPD» en esta casa, con su memoria, sus discos y sus tarjetas. Su propia bandera porque DECIDIR lo que se compra y COLOCAR una caja en un U los hacen personas distintas, y con una sola quien monta un rack rescribe lo que compra la empresa.',
         'sessions_view':   'Ver la lista de sesiones activas.',
         'sessions_revoke': 'Revocar sesiones activas, forzando a volver a iniciar sesión.',
@@ -5645,6 +5645,22 @@ LANG = {
     'dcim_brand_account':        'Nº de cliente',
     'dcim_brand_open':           'Abrir',
     'dcim_brand_none':           'Todavía no hay ninguna marca.',
+    'dcim_brand_v_table':        'Tabla',
+    'dcim_brand_v_usage':        'En uso en la instalación',
+    'dcim_brand_v_trees':        'Por tipo de modelo',
+    'dcim_brand_q_none':         'Ninguna marca coincide con el filtro.',
+    'dcim_brand_use_items':      'Dispositivos',
+    'dcim_brand_use_models':     'Modelos distintos',
+    'dcim_brand_use_racks':      'Racks',
+    'dcim_brand_use_sites':      'Sedes',
+    'dcim_brand_use_intro':
+        'Las marcas de las que hay dispositivos colocados, contando sólo los que puedes ver.',
+    'dcim_brand_use_none':       'No hay dispositivos colocados de ninguna marca que puedas ver.',
+    'dcim_brand_use_noperm':
+        'Para ver lo instalado hace falta el permiso de ver el inventario.',
+    'dcim_brand_trees_intro':
+        'Los modelos de cada marca, por lo que son. Pulsa una línea para ver esos modelos.',
+    'dcim_brand_trees_none':     'Ninguna marca tiene modelos en el catálogo.',
     'dcim_brand_intro':
         'Se dan de alta solas al importar el catálogo. Lo que se escribe aquí es lo '
         'que ninguna biblioteca trae.',
@@ -7330,7 +7346,7 @@ LANG = {
     'infra_registry': 'Configurar este dispositivo',
     'infra_coverage_none':     'Nadie puede ver aquí el registro de dispositivos, o no hay ninguno que coincida.',
     'tab_devtypes':            'Tipos de dispositivo',
-    'tab_models':              'Modelos',
+    'tab_models':              'Biblioteca',
     'infra_tab_place':         'Ubicación',
     'infra_tab_config':        'Configuración',
     'infra_place_none':        'Este dispositivo no está colocado en ningún rack del inventario.',

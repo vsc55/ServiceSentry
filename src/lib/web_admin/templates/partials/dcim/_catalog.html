@@ -71,6 +71,9 @@ let _dcCatUrlRead = false;
 const _DCCAT_URL = [
     ['ctab', () => _dcCatTab, v => { _dcCatTab = v; }],
     ['cview', () => _dcCatView, v => { _dcCatView = v; }],
+    // La vista de la pestaña Marcas (`_brands_views.html`): tabla, tarjetas, en uso…
+    ['bview', () => (_dcBrandView === 'table' ? '' : _dcBrandView),
+     v => { _dcBrandView = v; }],
     ['tree', () => _dcCatTree, v => { _dcCatTree = v; }],
     ['kind', () => _dcCatKind, v => { _dcCatKind = v; }],
     ['maker', () => _dcCatMaker, v => { _dcCatMaker = v; }],

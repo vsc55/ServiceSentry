@@ -24,13 +24,20 @@ let _dcBrands = null;
 //: La que se está escribiendo o corrigiendo, o `null`. La misma ficha para las dos cosas: crear
 //: y editar son lo mismo sobre otras columnas.
 let _dcBrandForm = null;
-//: Lo que se busca en la lista. En memoria y no en el servidor: son trescientas filas, y una
-//: ida y vuelta por letra para filtrar trescientas sería gastar la red en no hacer nada.
-let _dcBrandQ = '';
+
+//: Si ya hay una petición de la lista en vuelo: la vista «En uso» la pide al dibujarse, y sin
+//: esto cada dibujado mientras llega sería otra petición.
+let _dcBrandsBusy = false;
 
 async function _dcBrandsLoad() {
-    const d = await apiGet('/api/v1/dcim/brands') || {};
-    _dcBrands = {rows: d.brands || []};
+    if (_dcBrandsBusy) return;
+    _dcBrandsBusy = true;
+    // Lo instalado sólo cuando se mira: contarlo recorre el inventario entero.
+    const uso = _dcBrandViewNow() === 'usage';
+    try {
+        const d = await apiGet('/api/v1/dcim/brands' + (uso ? '?usage=1' : '')) || {};
+        _dcBrands = {rows: d.brands || [], usage: !!d.usage, asked: uso};
+    } finally { _dcBrandsBusy = false; }
     renderDcim();
 }
 
@@ -40,61 +47,153 @@ function _dcBrandsHtml() {
         return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm">
             </div></div>`;
     }
-    const puede = _dcimMay('dcim_catalog_manage');
-    const q = _dcBrandQ.trim().toLowerCase();
-    const rows = (_dcBrands.rows || []).filter(
-        b => !q || String(b.name || '').toLowerCase().indexOf(q) >= 0);
-    return `<div class="ss-toolrow mb-2">
-            <input class="form-control form-control-sm" style="max-width:16rem"
-                   value="${escAttr(_dcBrandQ)}"
-                   placeholder="${escAttr(t('dcim_cat_filter_maker'))}"
-                   oninput="_dcBrandQ=this.value;renderDcim()">
-            ${_dcBrandQ ? `<button class="btn btn-sm btn-secondary"
-                onclick="_dcBrandQ='';renderDcim()">${esc(t('clear'))}</button>` : ''}
-            ${puede ? `<button class="btn btn-sm btn-secondary" onclick="_dcBrandEdit(null)">
-                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_brand_new'))}</button>` : ''}
-            <span class="text-muted ss-fs-2 ss-toolrow-text">${esc(t('dcim_brand_intro'))}</span>
-        </div>
-        ${rows.length ? _dcBrandsTable(rows, puede)
-            : `<div class="text-muted ss-fs-2">${esc(t('dcim_brand_none'))}</div>`}`;
+    // Las otras cuatro vistas, en `_brands_views.html`.
+    if (_dcBrandViewNow() !== 'table') return _dcBrandViewsHtml();
+    // Sólo el hueco: lo llena `renderDcBrd`, que es lo que crea `createListTable`. Lo mismo que
+    // Plantillas y Equipos — la tabla compartida se dibuja sola y aquí no hay que saber cómo.
+    return `<div class="ss-toolrow mb-2">${_dcBrandSwitchHtml()}</div>
+        <div id="dcbrd-container" class="ss-vfill"></div>`;
 }
 
-function _dcBrandsTable(rows, puede) {
-    const enlace = (url, etiqueta) => url
-        ? `<a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer"
-             class="ss-fs-2">${esc(etiqueta)}</a>`
-        : '<span class="text-muted ss-fs-2">—</span>';
-    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
-        <thead><tr>
-            <th>${esc(t('dcim_brand_name'))}</th>
-            <th class="text-end">${esc(t('dcim_brand_models'))}</th>
-            <th>${esc(t('dcim_brand_url'))}</th>
-            <th>${esc(t('dcim_brand_support'))}</th>
-            <th>${esc(t('dcim_brand_account'))}</th>
-            <th></th>
-        </tr></thead>
-        <tbody>${rows.map(b => `<tr class="ss-rowlink"
-                onclick="_dcBrandGo(${jsStr(b.uid)},${jsStr(b.name || '')})">
-            <td class="fw-semibold">${esc(b.name || '')}
-                ${b.description ? `<div class="text-muted ss-fs-1 fw-normal">${
-                    esc(b.description)}</div>` : ''}</td>
-            <td class="text-end ss-tabular">${esc(String(b.models || 0))}</td>
-            <td onclick="event.stopPropagation()">${enlace(b.url, t('dcim_brand_open'))}</td>
-            <td onclick="event.stopPropagation()">${
-                enlace(b.support_url, t('dcim_brand_open'))}</td>
-            <td class="ss-fs-2 ss-tabular">${esc(b.account || '')}</td>
-            <td class="text-end">${puede ? `<div class="btn-group btn-group-sm"
-                onclick="event.stopPropagation()">
-                <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
-                    onclick="_dcBrandEdit(${jsStr(b.uid)})">
-                    <i class="bi bi-pencil"></i></button>
-                <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
-                    onclick="_dcBrandDrop(${jsStr(b.uid)},${jsStr(b.name || '')})">
-                    <i class="bi bi-trash"></i></button>
-            </div>` : ''}</td>
-        </tr>`).join('')}</tbody>
-    </table></div>`;
+/** Llenar el hueco, una vez puesto en el documento. Lo llama el dibujado del Catálogo DESPUÉS
+ *  de escribir el panel: antes el contenedor no existe, y la tabla se quedaría sin dibujar sin
+ *  un solo error. La pestaña de las marcas se ve siempre —con o sin permiso de gestión—, así
+ *  que mirar `_dcCatTab` es mirar lo que está a la vista. */
+function _dcBrandsMount() {
+    if (_dcCatTab !== 'brands' || _dcBrands === null || _dcBrandViewNow() !== 'table') return;
+    if (typeof renderDcBrd === 'function') renderDcBrd();
 }
+
+// ── La lista, sobre la tabla del panel ───────────────────────────────────────────────
+
+//: Lo que se puede enseñar de una marca. Las de auditoría —`_META_TAIL`— la fila las guardaba
+//: desde el primer día y la tabla a mano no tenía dónde ponerlas: apagadas por defecto, como
+//: en las demás pantallas.
+const _DCBR_COLS = [
+    {id: 'name', label: () => t('dcim_brand_name'), sortKey: 'name', always: true},
+    {id: 'models', label: () => t('dcim_brand_models'), sortKey: 'models', thClass: 'text-end'},
+    // Las plataformas también son catálogo de la marca —y hay marcas que sólo hacen eso—, pero
+    // no son modelos: en su propia columna, y no sumadas a la otra.
+    {id: 'platforms', label: () => t('dcim_cat_tab_platforms'), sortKey: 'platforms',
+     thClass: 'text-end'},
+    {id: 'url', label: () => t('dcim_brand_url'), sortKey: 'url'},
+    {id: 'support', label: () => t('dcim_brand_support'), sortKey: 'support'},
+    {id: 'account', label: () => t('dcim_brand_account'), sortKey: 'account'},
+    _META_COL.uid,
+    ..._META_TAIL,
+];
+const _DCBR_DEFAULT_COLS = new Set(['models', 'platforms', 'url', 'support', 'account']);
+
+let _dcbrVisibleCols = null;
+let _dcbrColOrder = null;
+let _dcbrPage = 1;
+let _dcbrPageSize = null;
+let _dcbrSort = 'name';
+let _dcbrSortDir = 'asc';
+let _dcbrCurrentPage = [];
+
+/** Por qué se ordena cada columna. Los modelos, por número: como texto, 10 va antes que 2. */
+function _dcbrSortValue(b, key) {
+    if (key === 'models' || key === 'platforms') return Number(b[key] || 0);
+    if (key === 'support') return String(b.support_url || '').toLowerCase();
+    return String(b[key] || '').toLowerCase();
+}
+
+/** Un enlace que se abre aparte. `stopPropagation` porque la fila entera lleva a los modelos:
+ *  sin eso, pulsar «Abrir» abre la web y además cambia de pestaña. */
+function _dcbrLink(url) {
+    return url
+        ? `<td onclick="event.stopPropagation()"><a href="${escAttr(url)}" target="_blank"
+             rel="noopener noreferrer" class="ss-fs-2">${esc(t('dcim_brand_open'))}</a></td>`
+        : '<td><span class="text-muted ss-fs-2">—</span></td>';
+}
+
+function _dcbrCell(b, id) {
+    if (id === 'name') {
+        return `<td class="fw-semibold">${esc(b.name || '')}
+            ${b.description ? `<div class="text-muted ss-fs-1 fw-normal">${
+                esc(b.description)}</div>` : ''}</td>`;
+    }
+    if (id === 'models') {
+        return `<td class="text-end ss-tabular">${esc(String(b.models || 0))}</td>`;
+    }
+    if (id === 'platforms') {
+        return `<td class="text-end ss-tabular">${esc(String(b.platforms || 0))}</td>`;
+    }
+    if (id === 'url') return _dcbrLink(b.url);
+    if (id === 'support') return _dcbrLink(b.support_url);
+    if (id === 'account') return `<td class="ss-fs-2 ss-tabular">${esc(b.account || '')}</td>`;
+    return '<td></td>';
+}
+
+function _dcbrRowActions(b) {
+    return `<div class="btn-group btn-group-sm" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+            onclick="_dcBrandEdit(${jsStr(b.uid)})"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+            onclick="_dcBrandDrop(${jsStr(b.uid)},${jsStr(b.name || '')})">
+            <i class="bi bi-trash"></i></button>
+    </div>`;
+}
+
+createListTable({
+    key: 'dcbrd', containerId: 'dcbrd-container', tableId: 'dcbrd-table',
+    accent: 'blue', icon: 'bi-tags', title: () => t('dcim_cat_tab_brands'),
+    columns: _DCBR_COLS, defaultVisible: _DCBR_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'dcim_cat_tab_brands',
+    prepare: async () => ({d: _dcBrands || {}, puede: _dcimMay('dcim_catalog_manage')}),
+    rows: (ctx) => (ctx.d.rows || []),
+    rowKey: (b) => String(b.uid || ''),
+    uidOf: (b) => String(b.uid || ''),
+    // El `uid` y las tres de auditoría salen de la fila misma, que ya las trae: sin esto las
+    // columnas están en el selector y sus celdas van vacías.
+    record: (b) => b,
+    // En memoria y no en el servidor: son trescientas filas, y una ida y vuelta por letra para
+    // filtrar trescientas sería gastar la red en no hacer nada.
+    filters: {
+        fields: () => [
+            {key: 'q', label: () => t('dcim_brand_name'), type: 'search', grow: true,
+             placeholder: () => t('dcim_cat_filter_maker')},
+        ],
+        match: (b, f) => {
+            const q = String(f.q || '').toLowerCase();
+            if (!q) return true;
+            return [b.name, b.description, b.account]
+                .some(x => String(x || '').toLowerCase().includes(q));
+        },
+    },
+    sortValue: (b, key) => _dcbrSortValue(b, key),
+    rowAttrs: (b) => ` class="ss-rowlink" onclick="_dcBrandGo(${jsStr(b.uid)},${
+        jsStr(b.name || '')})"`,
+    cell: (b, id) => _dcbrCell(b, id),
+    actions: (b) => _dcbrRowActions(b),
+    actionsVisible: ctx => ctx.puede,
+    headerButtons: ctx => (ctx.puede ? `<button class="btn btn-sm btn-primary"
+        onclick="_dcBrandEdit(null)"><i class="bi bi-plus-lg me-1"></i>${
+        esc(t('dcim_brand_new'))}</button>` : ''),
+    beforeBody: () => `<div class="text-muted ss-fs-2 mb-3">${esc(t('dcim_brand_intro'))}</div>`,
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_dcBrandsLoad()"
+        title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+        esc(t('refresh'))}</button>`,
+    // Con la tarjeta y su cabecera, y no a pelo: sin marcas es justo cuando hace falta el botón
+    // de crear la primera, y un vacío sin cabecera se lo llevaba.
+    emptyBody: () => `<div class="text-center py-5 text-muted">
+        <i class="bi bi-tags ss-empty-icon"></i><span>${esc(t('dcim_brand_none'))}</span></div>`,
+    state: {
+        visible: {get: () => _dcbrVisibleCols, set: v => { _dcbrVisibleCols = v; }},
+        order: {get: () => _dcbrColOrder, set: v => { _dcbrColOrder = v; }},
+        page: {get: () => _dcbrPage, set: v => { _dcbrPage = v; }},
+        pageSize: {get: () => _dcbrPageSize, set: v => { _dcbrPageSize = v; }},
+        sort: {get: () => _dcbrSort, set: v => { _dcbrSort = v; }},
+        sortDir: {get: () => _dcbrSortDir, set: v => { _dcbrSortDir = v; }},
+        currentPage: {get: () => _dcbrCurrentPage, set: v => { _dcbrCurrentPage = v; }},
+    },
+    globalPrefix: {
+        render: 'renderDcBrd', goPage: '_goDcBrdPage', changePageSize: '_changeDcBrdPageSize',
+        sort: '_sortDcBrd', toggleCol: '_dcbrToggleCol', resetCols: '_resetDcbrCols',
+        saveOrder: '_dcbrSaveColOrder', initFeatures: '_initDcbrTableFeatures',
+    },
+});
 
 /** Ir a sus modelos. Por **uid** y no por nombre: es lo que sigue siendo cierto después de
  *  renombrarla, y acotar por el texto dejaría de encontrar nada el día que «HP» pase a llamarse

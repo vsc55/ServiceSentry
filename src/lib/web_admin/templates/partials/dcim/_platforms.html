@@ -24,6 +24,11 @@ let _dcPlatForm = null;
 //: Lo que se busca. En memoria: son decenas, y una ida y vuelta por letra sería gastar la red
 //: en no hacer nada.
 let _dcPlatQ = '';
+//: La marca a la que se ha entrado desde la pestaña Marcas, por su uid, y su nombre para la
+//: chapa que la quita. Por uid y no por texto: buscar «Microsoft» encontraría también lo que
+//: sólo lo lleva en el nombre.
+let _dcPlatBrand = '';
+let _dcPlatBrandName = '';
 //: Las marcadas para quitar. Un conjunto en una variable y no en las casillas: esta pantalla se
 //: redibuja entera, y lo que solo viva en el DOM se va con el redibujado siguiente — que aquí es
 //: el clic siguiente.
@@ -43,7 +48,9 @@ function _dcPlatPick(uid, si) {
 function _dcPlatSelAll(si) {
     const q = _dcPlatQ.trim().toLowerCase();
     ((_dcPlats || {}).rows || [])
-        .filter(p => !q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0)
+        // Las mismas que se ven: marcar todas con una marca puesta no marca las de otras.
+        .filter(p => (!q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0)
+                     && (!_dcPlatBrand || String(p.brand_uid || '') === _dcPlatBrand))
         .forEach(p => { if (si) _dcPlatSel.add(p.uid); else _dcPlatSel.delete(p.uid); });
     renderDcim();
 }
@@ -85,7 +92,8 @@ function _dcPlatsHtml() {
     const puede = _dcimMay('dcim_catalog_manage');
     const q = _dcPlatQ.trim().toLowerCase();
     const rows = (_dcPlats.rows || []).filter(
-        p => !q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0);
+        p => (!q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0)
+             && (!_dcPlatBrand || String(p.brand_uid || '') === _dcPlatBrand));
     return `<div class="ss-toolrow mb-2">
             <input class="form-control form-control-sm" style="max-width:16rem"
                    value="${escAttr(_dcPlatQ)}"
@@ -93,6 +101,10 @@ function _dcPlatsHtml() {
                    oninput="_dcPlatQ=this.value;renderDcim()">
             ${_dcPlatQ ? `<button class="btn btn-sm btn-secondary"
                 onclick="_dcPlatQ='';renderDcim()">${esc(t('clear'))}</button>` : ''}
+            ${_dcPlatBrand ? `<button class="btn btn-sm btn-primary"
+                    onclick="_dcPlatBrand='';_dcPlatBrandName='';renderDcim()"
+                    title="${escAttr(t('dcim_cat_tab_brands'))}">
+                ${esc(_dcPlatBrandName)}<i class="bi bi-x-lg ms-1"></i></button>` : ''}
             ${puede ? `<button class="btn btn-sm btn-secondary" onclick="_dcPlatEdit(null)">
                 <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_plat_new'))}</button>` : ''}
             <button class="btn btn-sm btn-secondary" onclick="_dcPlatsLoad()"

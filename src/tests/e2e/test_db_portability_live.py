@@ -45,7 +45,7 @@ _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest',
-                 'ss_dc_feature_live',
+                 'ss_dc_feature_live', 'ss_dc_type_live', 'ss_dc_platform_live',
                  'ip_bans', 'syslog_drops', 'job_history',
                  'SystemEvents', 'SystemEventsProperties',
                  'ss_t6db_keys', 'ss_t6db_nokey', 'ss_t6db_cpk',
@@ -185,6 +185,37 @@ def test_a_room_piece_with_a_lock_roundtrips(live_db):
     s.update(uid, {'lock': 'locker'}, actor='test')
     assert [f['lock'] for f in s.list('room_uid = ?', ('r1',))] == ['locker']
     assert s.counts('lock') == {'locker': 1}
+
+
+def test_the_brands_counts_by_tree_and_by_model_read_on_every_engine(live_db):
+    """The brands tab's catalogue reads: a `GROUP BY` over two columns, an `IN` list of model
+    uids, chunked, and the platforms per brand. Plain SQL, but the tab draws every brand off them, so they are run on
+    the real engines rather than assumed."""
+    import dataclasses
+    from types import SimpleNamespace
+    from lib.core.dcim.catalog import SCHEMA, CatalogStore
+    spec = dataclasses.replace(SCHEMA, name='ss_dc_type_live')
+    live_db.reconcile_table(spec)
+    filas = [('t1', 'b1', 'device-types'), ('t2', 'b1', 'device-types'),
+             ('t3', 'b1', 'module-types'), ('t4', 'b2', 'rack-types'), ('t5', '', 'device-types')]
+    for uid, marca, arbol in filas:
+        live_db.execute('INSERT INTO ss_dc_type_live (uid, manufacturer, model, brand_uid, tree) '
+                        'VALUES (?, ?, ?, ?, ?)', (uid, 'M', uid, marca, arbol))
+    live_db.commit()
+    yo = SimpleNamespace(_db=live_db, _sql_table='ss_dc_type_live')
+    assert CatalogStore.brand_tree_counts(yo) == {
+        'b1': {'device-types': 2, 'module-types': 1}, 'b2': {'rack-types': 1}}
+    assert CatalogStore.brands_of(yo, ['t1', 't4', 't5', 'nope', '']) == {'t1': 'b1',
+                                                                         't4': 'b2'}
+    # And the platforms, counted per brand the same way: a brand may make only systems.
+    from lib.core.dcim.platforms import SCHEMA as PSCHEMA, PlatformStore
+    live_db.reconcile_table(dataclasses.replace(PSCHEMA, name='ss_dc_platform_live'))
+    for uid, marca in (('p1', 'b3'), ('p2', 'b3'), ('p3', 'b1'), ('p4', '')):
+        live_db.execute('INSERT INTO ss_dc_platform_live (uid, name, slug, brand_uid) '
+                        'VALUES (?, ?, ?, ?)', (uid, uid, uid, marca))
+    live_db.commit()
+    plat = SimpleNamespace(_db=live_db, _sql_table='ss_dc_platform_live')
+    assert PlatformStore.brand_counts(plat) == {'b3': 2, 'b1': 1}
 
 
 def test_events_upsert_same_value(live_db):
