@@ -127,10 +127,13 @@ __o.withManage = {
     actionsHeader: h1.includes('ss-th-actions'),
     edit: h1.includes('_dcBrandEdit('), drop: h1.includes('_dcBrandDrop('),
     newBtn: h1.includes('_dcBrandEdit(null)'),
-    intro: h1.includes(t('dcim_brand_intro')),
+    // Where the brands come from: the title's help, not a line inside the card — the panel's
+    // other lists carry no such line.
+    intro: h1.includes(`title="${escAttr(t('dcim_brand_intro'))}"`)
+           && !h1.includes(`>${esc(t('dcim_brand_intro'))}<`),
     sortModels: h1.includes("_sortDcBrd('models')"),
     sortPlats: h1.includes("_sortDcBrd('platforms')"),
-    platsRight: /<th class="ss-th ss-th-resizable text-end" data-col="platforms"/.test(h1),
+    platsRight: /<th class="ss-th ss-th-resizable text-end pe-4" data-col="platforms"/.test(h1),
     modelsRight: /<th class="ss-th ss-th-resizable text-end" data-col="models"/.test(h1),
     desc: h1.includes('conmutadores'),
     link: h1.includes('href="https://acme.example"'),
@@ -168,11 +171,29 @@ __o.page2 = uids();
 _changeDcBrdPageSize('25');
 await renderDcBrd();
 
-// 5. The row goes to that brand's models, by uid.
+// 5. The row opens that brand's record in the side drawer; from there, its models — by uid.
 let abierto = 0;
 _dcCatOpen = () => { abierto++; };
+let cajon = null;
+showDrawer = (tt, h, a) => { cajon = {tt, h, a}; };
+hideDrawer = () => {};
+// The browser's address, kept: `_dcLibGo` writes it and the library reads its view from it.
+window.history = {replaceState: (s, tt, u) => __goUrl(u), pushState: (s, tt, u) => __goUrl(u)};
+function __goUrl(u) {
+    const x = new URL(String(u), 'http://x');
+    window.location.pathname = x.pathname;
+    window.location.search = x.search;
+}
+_sbHighlightSub = () => {};
+_dcLibBooted = true;
+_dcPlats = {rows: [], kinds: [], lifecycle: []};
 const clic = filas().find(f => f.includes('"b2"'));
-eval(clic);
+await eval(clic);
+__o.drawer = {title: cajon && cajon.tt,
+              toModels: !!cajon && cajon.h.includes('_dcLibBrandModels(&quot;b2&quot;'),
+              support: !!cajon && cajon.h.includes('href="https://soporte.borealis.example"'),
+              edit: !!cajon && cajon.a.includes('_dcLibBrandEdit(&quot;b2&quot;)')};
+_dcLibBrandModels('b2', '');
 __o.go = {tab: _dcCatTab, view: _dcCatView, brand: _dcCatBrand, name: _dcCatBrandName,
           opened: abierto};
 _dcCatTab = 'brands';
@@ -286,7 +307,13 @@ class TestSortingAndPages:
 @_needs_node
 class TestClicksAndPermission:
 
-    def test_a_row_opens_that_brands_models(self, out):
+    def test_a_row_opens_that_brands_record_in_the_drawer(self, out):
+        """Not straight to its models any more: the row answers «how do I get support from
+        them» beside the list, and the models are one button away."""
+        assert out['drawer'] == {'title': 'Borealis', 'toModels': True, 'support': True,
+                                 'edit': True}
+
+    def test_and_the_record_opens_that_brands_models(self, out):
         assert out['go'] == {'tab': 'list', 'view': 'list', 'brand': 'b2', 'name': 'Borealis',
                              'opened': 1}
 

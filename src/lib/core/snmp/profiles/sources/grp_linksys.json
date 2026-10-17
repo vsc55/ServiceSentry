@@ -1,13 +1,7 @@
 {
   "id": "grp_linksys",
-  "label": {
-    "en_EN": "Linksys switch (everything)",
-    "es_ES": "Switch Linksys (todo)"
-  },
-  "description": {
-    "en_EN": "Everything a Linksys managed switch answers: its own hardware — CPU, temperature, fans, power supplies and consumption, per stack unit — plus the standard MIBs, with traffic and errors on every port.",
-    "es_ES": "Todo lo que contesta un switch gestionable de Linksys: su propio hardware —CPU, temperatura, ventiladores, fuentes y consumo, por unidad de la pila— más las MIBs estándar, con tráfico y errores en cada puerto."
-  },
+  "label": {"i18n": "grp_linksys/label"},
+  "description": {"i18n": "grp_linksys/desc"},
   "includes": [
     "linksys_switch",
     "sys_generic",

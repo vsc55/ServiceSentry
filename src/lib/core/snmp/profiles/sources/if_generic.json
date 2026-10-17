@@ -1,23 +1,14 @@
 {
   "id": "if_generic",
-  "label": {
-    "en_EN": "Network interfaces",
-    "es_ES": "Interfaces de red"
-  },
-  "short_label": {
-    "en_EN": "Interfaces",
-    "es_ES": "Interfaces"
-  },
+  "label": {"i18n": "if_generic/label"},
+  "short_label": {"i18n": "if_generic/short"},
   "headline_rows": {
     "role": "kind",
     "any": [
       "6"
     ]
   },
-  "description": {
-    "en_EN": "Traffic, errors, discards and state per interface, from IF-MIB. The counters are cumulative: what is recorded is the rate between samples, which is what a chart of a link is. The 64-bit columns are preferred where the device serves them — a 32-bit octet counter wraps in about 34 seconds on a gigabit link. Errors and discards are read in BOTH directions: a link drops packets on one side at a time, and the half that is not charted is the half nobody sees. Speed and administrative state are the two things that say whether a quiet interface is idle, negotiated down, or switched off on purpose.",
-    "es_ES": "Tráfico, errores, descartes y estado por interfaz, de IF-MIB. Los contadores son acumulativos: se guarda la tasa entre muestras, que es lo que de verdad es la gráfica de un enlace. Se prefieren las columnas de 64 bits donde el dispositivo las sirva — un contador de octetos de 32 bits da la vuelta en unos 34 segundos en un enlace de gigabit. Errores y descartes se leen en LAS DOS direcciones: un enlace tira paquetes de un lado cada vez, y la mitad que no se grafica es la mitad que nadie ve. La velocidad y el estado administrativo son lo que dice si una interfaz callada está ociosa, negociada a menos, o apagada a propósito."
-  },
+  "description": {"i18n": "if_generic/desc"},
   "match": {
     "probe": "1.3.6.1.2.1.2.1.0"
   },
@@ -30,10 +21,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Traffic in",
-        "es_ES": "Tráfico de entrada"
-      }
+      "label": {"i18n": "if_generic/if_in"}
     },
     {
       "key": "if_out",
@@ -43,10 +31,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Traffic out",
-        "es_ES": "Tráfico de salida"
-      }
+      "label": {"i18n": "if_generic/if_out"}
     },
     {
       "key": "if_hc_in",
@@ -56,10 +41,7 @@
       "width": 64,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Traffic in (64-bit)",
-        "es_ES": "Tráfico de entrada (64 bits)"
-      }
+      "label": {"i18n": "if_generic/if_hc_in"}
     },
     {
       "key": "if_hc_out",
@@ -69,10 +51,7 @@
       "width": 64,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Traffic out (64-bit)",
-        "es_ES": "Tráfico de salida (64 bits)"
-      }
+      "label": {"i18n": "if_generic/if_hc_out"}
     },
     {
       "key": "if_pkts_in",
@@ -82,10 +61,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Packets in",
-        "es_ES": "Paquetes de entrada"
-      }
+      "label": {"i18n": "if_generic/if_pkts_in"}
     },
     {
       "key": "if_pkts_out",
@@ -95,10 +71,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Packets out",
-        "es_ES": "Paquetes de salida"
-      }
+      "label": {"i18n": "if_generic/if_pkts_out"}
     },
     {
       "key": "if_errors_in",
@@ -108,10 +81,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Input errors",
-        "es_ES": "Errores de entrada"
-      }
+      "label": {"i18n": "if_generic/if_errors_in"}
     },
     {
       "key": "if_errors_out",
@@ -121,10 +91,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Output errors",
-        "es_ES": "Errores de salida"
-      }
+      "label": {"i18n": "if_generic/if_errors_out"}
     },
     {
       "key": "if_discards_in",
@@ -134,10 +101,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Input discards",
-        "es_ES": "Descartes de entrada"
-      }
+      "label": {"i18n": "if_generic/if_discards_in"}
     },
     {
       "key": "if_discards_out",
@@ -147,10 +111,7 @@
       "width": 32,
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "line",
-      "label": {
-        "en_EN": "Output discards",
-        "es_ES": "Descartes de salida"
-      }
+      "label": {"i18n": "if_generic/if_discards_out"}
     },
     {
       "key": "if_total_in",
@@ -164,14 +125,8 @@
       "chart_with": [
         "if_total_out"
       ],
-      "chart_label": {
-        "en_EN": "Traffic (all ports)",
-        "es_ES": "Tráfico (todos los puertos)"
-      },
-      "label": {
-        "en_EN": "Traffic in",
-        "es_ES": "Tráfico de entrada"
-      },
+      "chart_label": {"i18n": "if_generic/if_total_in/chart"},
+      "label": {"i18n": "if_generic/if_total_in"},
       "walk": "1.3.6.1.2.1.31.1.1.1.6",
       "kind": "counter",
       "unit": "B/s",
@@ -187,10 +142,7 @@
         "oid": "1.3.6.1.2.1.2.2.1.3",
         "equals": "6"
       },
-      "label": {
-        "en_EN": "Traffic out",
-        "es_ES": "Tráfico de salida"
-      },
+      "label": {"i18n": "if_generic/if_total_out"},
       "walk": "1.3.6.1.2.1.31.1.1.1.10",
       "kind": "counter",
       "unit": "B/s",
@@ -206,65 +158,38 @@
       "unit": "",
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "value",
-      "label": {
-        "en_EN": "Operational state",
-        "es_ES": "Estado operativo"
-      },
+      "label": {"i18n": "if_generic/if_oper"},
       "states": {
         "1": {
-          "label": {
-            "en_EN": "Up",
-            "es_ES": "Activo"
-          },
+          "label": {"i18n": "if_generic/if_oper/1"},
           "level": "ok"
         },
         "2": {
-          "label": {
-            "en_EN": "Down",
-            "es_ES": "Caído"
-          },
+          "label": {"i18n": "if_generic/if_oper/2"},
           "level": "bad"
         },
         "3": {
-          "label": {
-            "en_EN": "Testing",
-            "es_ES": "En pruebas"
-          },
+          "label": {"i18n": "if_generic/if_oper/3"},
           "level": "info"
         },
         "4": {
-          "label": {
-            "en_EN": "Unknown",
-            "es_ES": "Desconocido"
-          },
+          "label": {"i18n": "if_generic/if_oper/4"},
           "level": "info"
         },
         "5": {
-          "label": {
-            "en_EN": "Dormant",
-            "es_ES": "Latente"
-          },
+          "label": {"i18n": "if_generic/if_oper/5"},
           "level": "warn"
         },
         "6": {
-          "label": {
-            "en_EN": "Not present",
-            "es_ES": "No presente"
-          },
+          "label": {"i18n": "if_generic/if_oper/6"},
           "level": "info"
         },
         "7": {
-          "label": {
-            "en_EN": "Lower layer down",
-            "es_ES": "Capa inferior caída"
-          },
+          "label": {"i18n": "if_generic/if_oper/7"},
           "level": "bad"
         },
         "off": {
-          "label": {
-            "en_EN": "Switched off",
-            "es_ES": "Apagado"
-          },
+          "label": {"i18n": "if_generic/if_oper/off"},
           "level": "info",
           "icon": "bi-power"
         }
@@ -282,30 +207,18 @@
       "unit": "",
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "value",
-      "label": {
-        "en_EN": "Administrative state",
-        "es_ES": "Estado administrativo"
-      },
+      "label": {"i18n": "if_generic/if_admin"},
       "states": {
         "1": {
-          "label": {
-            "en_EN": "Up",
-            "es_ES": "Activo"
-          },
+          "label": {"i18n": "if_generic/if_admin/1"},
           "level": "ok"
         },
         "2": {
-          "label": {
-            "en_EN": "Down",
-            "es_ES": "Apagado"
-          },
+          "label": {"i18n": "if_generic/if_admin/2"},
           "level": "info"
         },
         "3": {
-          "label": {
-            "en_EN": "Testing",
-            "es_ES": "En pruebas"
-          },
+          "label": {"i18n": "if_generic/if_admin/3"},
           "level": "info"
         }
       }
@@ -317,17 +230,11 @@
       "unit": "bit/s",
       "index_label": "1.3.6.1.2.1.2.2.1.2",
       "chart": "value",
-      "label": {
-        "en_EN": "Link speed",
-        "es_ES": "Velocidad del enlace"
-      }
+      "label": {"i18n": "if_generic/if_speed"}
     },
     {
       "key": "if_alias",
-      "label": {
-        "en_EN": "Description",
-        "es_ES": "Descripción"
-      },
+      "label": {"i18n": "if_generic/if_alias"},
       "walk": "1.3.6.1.2.1.31.1.1.1.18",
       "kind": "text",
       "index_label": "1.3.6.1.2.1.2.2.1.2",
@@ -336,10 +243,7 @@
     },
     {
       "key": "if_mac",
-      "label": {
-        "en_EN": "MAC address",
-        "es_ES": "Dirección MAC"
-      },
+      "label": {"i18n": "if_generic/if_mac"},
       "walk": "1.3.6.1.2.1.2.2.1.6",
       "kind": "text",
       "index_label": "1.3.6.1.2.1.2.2.1.2",
@@ -351,136 +255,79 @@
       "tally": "all",
       "states": {
         "1": {
-          "label": {
-            "en_EN": "Other",
-            "es_ES": "Otro"
-          },
+          "label": {"i18n": "if_generic/if_type/1"},
           "level": "info"
         },
         "6": {
-          "label": {
-            "en_EN": "Ethernet",
-            "es_ES": "Ethernet"
-          },
+          "label": {"i18n": "if_generic/if_type/6"},
           "level": "info"
         },
         "22": {
-          "label": {
-            "en_EN": "Point-to-point serial",
-            "es_ES": "Serie punto a punto"
-          },
+          "label": {"i18n": "if_generic/if_type/22"},
           "level": "info"
         },
         "23": {
-          "label": {
-            "en_EN": "PPP",
-            "es_ES": "PPP"
-          },
+          "label": {"i18n": "if_generic/if_type/23"},
           "level": "info"
         },
         "24": {
-          "label": {
-            "en_EN": "Loopback",
-            "es_ES": "Loopback"
-          },
+          "label": {"i18n": "if_generic/if_type/24"},
           "level": "info"
         },
         "33": {
-          "label": {
-            "en_EN": "Serial (RS-232)",
-            "es_ES": "Serie (RS-232)"
-          },
+          "label": {"i18n": "if_generic/if_type/33"},
           "level": "info"
         },
         "37": {
-          "label": {
-            "en_EN": "ATM",
-            "es_ES": "ATM"
-          },
+          "label": {"i18n": "if_generic/if_type/37"},
           "level": "info"
         },
         "53": {
-          "label": {
-            "en_EN": "Virtual (VLAN)",
-            "es_ES": "Virtual (VLAN)"
-          },
+          "label": {"i18n": "if_generic/if_type/53"},
           "level": "info"
         },
         "62": {
-          "label": {
-            "en_EN": "Fast Ethernet",
-            "es_ES": "Fast Ethernet"
-          },
+          "label": {"i18n": "if_generic/if_type/62"},
           "level": "info"
         },
         "71": {
-          "label": {
-            "en_EN": "Wi-Fi (802.11)",
-            "es_ES": "Wi-Fi (802.11)"
-          },
+          "label": {"i18n": "if_generic/if_type/71"},
           "level": "info"
         },
         "117": {
-          "label": {
-            "en_EN": "Gigabit Ethernet",
-            "es_ES": "Gigabit Ethernet"
-          },
+          "label": {"i18n": "if_generic/if_type/117"},
           "level": "info"
         },
         "131": {
-          "label": {
-            "en_EN": "Tunnel",
-            "es_ES": "Túnel"
-          },
+          "label": {"i18n": "if_generic/if_type/131"},
           "level": "info"
         },
         "135": {
-          "label": {
-            "en_EN": "VLAN",
-            "es_ES": "VLAN"
-          },
+          "label": {"i18n": "if_generic/if_type/135"},
           "level": "info"
         },
         "136": {
-          "label": {
-            "en_EN": "Routed VLAN",
-            "es_ES": "VLAN enrutada"
-          },
+          "label": {"i18n": "if_generic/if_type/136"},
           "level": "info"
         },
         "150": {
-          "label": {
-            "en_EN": "MPLS tunnel",
-            "es_ES": "Túnel MPLS"
-          },
+          "label": {"i18n": "if_generic/if_type/150"},
           "level": "info"
         },
         "161": {
-          "label": {
-            "en_EN": "Aggregate (LAG)",
-            "es_ES": "Agregado (LAG)"
-          },
+          "label": {"i18n": "if_generic/if_type/161"},
           "level": "info"
         },
         "166": {
-          "label": {
-            "en_EN": "MPLS",
-            "es_ES": "MPLS"
-          },
+          "label": {"i18n": "if_generic/if_type/166"},
           "level": "info"
         },
         "209": {
-          "label": {
-            "en_EN": "Bridge",
-            "es_ES": "Puente"
-          },
+          "label": {"i18n": "if_generic/if_type/209"},
           "level": "info"
         }
       },
-      "label": {
-        "en_EN": "Interface type",
-        "es_ES": "Tipo de interfaz"
-      },
+      "label": {"i18n": "if_generic/if_type"},
       "walk": "1.3.6.1.2.1.2.2.1.3",
       "kind": "text",
       "index_label": "1.3.6.1.2.1.2.2.1.2",
@@ -488,10 +335,7 @@
     },
     {
       "key": "if_mtu",
-      "label": {
-        "en_EN": "MTU",
-        "es_ES": "MTU"
-      },
+      "label": {"i18n": "if_generic/if_mtu"},
       "walk": "1.3.6.1.2.1.2.2.1.4",
       "kind": "gauge",
       "unit": "",

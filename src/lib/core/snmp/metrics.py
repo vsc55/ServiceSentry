@@ -73,6 +73,10 @@ def scale_value(value, factor):
     except (TypeError, ValueError):
         f = 1.0
     out = num * f
+    if not float(f).is_integer():
+        # A fractional factor is a decimal point moved, and binary floating point makes 2315 ×
+        # 0.1 read 231.50000000000003: the reading had no such digits.
+        out = round(out, 9)
     # An integer stays an integer: "41" reads as a reading, "41.0" reads as a computation.
     return int(out) if float(out).is_integer() else out
 

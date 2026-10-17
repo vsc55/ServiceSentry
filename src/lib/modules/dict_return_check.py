@@ -45,6 +45,30 @@ class ReturnModuleCheck:
     def __init__(self):
         """ Inicializa Objeto. """
         self._dict_return = {}
+        self._kept: set = set()
+
+    def keep(self, prefix: str) -> None:
+        """Say that what is recorded under *prefix* (the key itself and every ``<prefix>/…``
+        part) was NOT asked this run and stands as it is: no result is reported for it, and the
+        monitor does not prune it as an item the module stopped reporting.
+
+        For a thing a module samples on a cadence of its own, slower than the cycle — the
+        demo's simulated SNMP agents (`watchfuls/snmp`): in the cycles between two of its
+        samples it is still there, with the last thing it said."""
+        if prefix:
+            self._kept.add(str(prefix))
+
+    def is_kept(self, key: str) -> bool:
+        """Whether *key* is under a prefix `keep` was told about."""
+        if not self._kept:
+            return False
+        key = str(key)
+        return key in self._kept or key.split('/', 1)[0] in self._kept
+
+    @property
+    def kept(self) -> set:
+        """The prefixes `keep` was told about."""
+        return set(self._kept)
 
     @property
     def list(self) -> dict:

@@ -46,6 +46,7 @@ _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest',
                  'ss_dc_feature_live', 'ss_dc_type_live', 'ss_dc_platform_live',
+                 'ss_dc_build_live', 'ss_dc_build_part_live',
                  'ip_bans', 'syslog_drops', 'job_history',
                  'SystemEvents', 'SystemEventsProperties',
                  'ss_t6db_keys', 'ss_t6db_nokey', 'ss_t6db_cpk',
@@ -216,6 +217,81 @@ def test_the_brands_counts_by_tree_and_by_model_read_on_every_engine(live_db):
     live_db.commit()
     plat = SimpleNamespace(_db=live_db, _sql_table='ss_dc_platform_live')
     assert PlatformStore.brand_counts(plat) == {'b3': 2, 'b1': 1}
+
+
+def test_the_librarys_summary_and_filters_read_on_every_engine(live_db):
+    """The library's Summary and the filters its figures land on: `SUM(CASE …)` over the flag
+    conditions, `GROUP BY source, imported_at` ordered and limited, the shape counts under a
+    `WHERE`, the chunked `NOT IN` of «never placed», and the templates' model counts. Plain
+    SQL, but `FILTER (WHERE …)` would have been PostgreSQL-only and a single `NOT IN` of a
+    thousand markers is past some engines, so it is run where it would break."""
+    import dataclasses
+    from types import SimpleNamespace
+    from lib.core.dcim.catalog import SCHEMA, CatalogStore
+    live_db.reconcile_table(dataclasses.replace(SCHEMA, name='ss_dc_type_live'))
+    a, b = '2026-10-01T10:00:00Z', '2026-10-05T09:30:00Z'
+    filas = [('t1', 'device-types', '{"interfaces": {"x": 1}}', 'a.png', 'b1', 'library', a),
+             ('t2', 'device-types', '{}', '', 'b1', 'library', a),
+             ('t3', 'rack-types', '{}', '', 'b2', 'library', b),
+             ('t4', 'device-types', '{}', '', '', 'manual', '')]
+    for uid, arbol, puertos, foto, marca, fuente, cuando in filas:
+        live_db.execute('INSERT INTO ss_dc_type_live (uid, manufacturer, model, tree, ports, '
+                        'front_image, brand_uid, source, imported_at) '
+                        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        (uid, 'M', uid, arbol, puertos, foto, marca, fuente, cuando))
+    live_db.commit()
+    yo = SimpleNamespace(_db=live_db, _sql_table='ss_dc_type_live',
+                         FLAG_SQL=CatalogStore.FLAG_SQL)
+    assert CatalogStore.quality(yo) == {'total': 4, 'no_image': 3, 'no_ports': 2,
+                                        'no_brand': 1, 'manual': 1}
+    assert CatalogStore.imports(yo, 5) == [('library', b, 1), ('library', a, 2)]
+    assert dict(CatalogStore.trees(yo, 'brand_uid = ?', ('b1',))) == {'device-types': 2}
+    # «Never placed nor in a template», as the route writes it: chunks of 400, AND-ed.
+    usados = sorted(['x%d' % i for i in range(900)] + ['t1'])
+    trozos = [usados[i:i + 400] for i in range(0, len(usados), 400)]
+    where = ' AND '.join(f"uid NOT IN ({', '.join('?' for _ in t)})" for t in trozos)
+    fila = live_db.fetchone(f'SELECT COUNT(*) FROM ss_dc_type_live WHERE {where}',
+                            tuple(u for t in trozos for u in t))
+    assert int(fila[0]) == 3
+    # And in how many templates each model appears, chassis or part, once per template.
+    from lib.core.dcim.builds import _BUILD, _BUILD_PART, BuildStore
+    live_db.reconcile_table(dataclasses.replace(_BUILD, name='ss_dc_build_live'))
+    live_db.reconcile_table(dataclasses.replace(_BUILD_PART, name='ss_dc_build_part_live'))
+    for uid, nombre, tipo in (('B1', 'one', 't1'), ('B2', 'two', 't2'), ('B3', 'three', '')):
+        live_db.execute('INSERT INTO ss_dc_build_live (uid, name, type_uid) VALUES (?, ?, ?)',
+                        (uid, nombre, tipo))
+    for uid, plantilla, tipo in (('P1', 'B1', 't3'), ('P2', 'B1', 't3'), ('P3', 'B2', 't1'),
+                                 ('P4', 'B3', '')):
+        live_db.execute('INSERT INTO ss_dc_build_part_live (uid, build_uid, type_uid) '
+                        'VALUES (?, ?, ?)', (uid, plantilla, tipo))
+    live_db.commit()
+    plantillas = SimpleNamespace(_db=live_db,
+                                 builds=SimpleNamespace(_sql_table='ss_dc_build_live'),
+                                 parts=SimpleNamespace(_sql_table='ss_dc_build_part_live'))
+    assert BuildStore.type_counts(plantillas) == {'t1': 2, 't2': 1, 't3': 1}
+
+
+def test_the_models_list_sorts_and_pages_the_same_on_every_engine(live_db):
+    """The Models list is sorted and paged on the server: each whitelisted key, both ways,
+    blanks last both ways, and two pages of one order that neither share nor lose a row. A
+    `CASE` in the ORDER BY and `LOWER()` over the three engines' default collations — the same
+    rows the SQLite route tests use (`tests/helpers.py`), with the same answers."""
+    import dataclasses
+    from lib.core.dcim.catalog import SCHEMA, CatalogStore
+    from tests.helpers import CATALOG_SORT_EXPECT, CATALOG_SORT_INSERT, CATALOG_SORT_ROWS
+    live_db.reconcile_table(dataclasses.replace(SCHEMA, name='ss_dc_type_live'))
+    for fila in CATALOG_SORT_ROWS:
+        live_db.execute(CATALOG_SORT_INSERT.format(table='ss_dc_type_live'), fila)
+    live_db.commit()
+    uids = lambda sql: [r[0] for r in live_db.fetchall(sql) or ()]  # noqa: E731
+    base = 'SELECT uid FROM ss_dc_type_live ORDER BY '
+    for clave, (sube, baja) in CATALOG_SORT_EXPECT.items():
+        assert uids(base + CatalogStore.order_by(clave, False)) == sube, clave
+        assert uids(base + CatalogStore.order_by(clave, True)) == baja, clave
+        # Paged: the first two and the next two are the whole order, once each.
+        orden = CatalogStore.order_by(clave, True)
+        assert (uids(f'{base}{orden} LIMIT 2') + uids(f'{base}{orden} LIMIT 2 OFFSET 2')
+                == baja), clave
 
 
 def test_events_upsert_same_value(live_db):
@@ -1104,3 +1180,73 @@ def test_a_copy_pages_by_key_and_streams_what_has_none(live_db):
     after = {t: sorted(map(tuple, live_db.fetchall(f'SELECT * FROM {q(t)}')))
              for t in counts}
     assert after == before
+
+
+def test_the_demo_installs_and_goes_whole_on_the_real_engine(live_db, tmp_path):
+    """The demo with its catalogue of every tree —cabinets, devices, modules, components—, its
+    templates and platforms, written and removed on the real engine.
+
+    Thousands of rows across a dozen tables in one go, and a removal that has to find them by
+    what references what: on a clean panel every rack names a demo cabinet, every fitted part
+    a demo module or component, building twice is refused and removing leaves no demo row —
+    nor its brand, templates or platforms. Only what the panel created is dropped after.
+    """
+    import json
+    from unittest import mock
+
+    from lib.core.dcim import demo
+    from lib.core.dcim.builds import BuildStore
+    from lib.core.dcim.catalog import CatalogStore
+    from lib.core.dcim.platforms import PlatformStore
+    from lib.web_admin import WebAdmin
+
+    cfg = {'mysql': _mysql_cfg, 'mariadb': _mariadb_cfg,
+           'postgresql': _pg_cfg}[live_db._ss_engine]()
+    env = {'SS_DB_DRIVER': cfg['driver'], 'SS_DB_HOST': cfg['host'],
+           'SS_DB_PORT': str(cfg['port']), 'SS_DB_NAME': cfg['name'],
+           'SS_DB_USER': cfg['user'], 'SS_DB_PASSWORD': cfg['password']}
+    pre_existing = set(live_db.list_tables())
+    live_db.commit()
+    conf, var = tmp_path / 'conf', tmp_path / 'var'
+    conf.mkdir()
+    var.mkdir()
+    (conf / 'config.json').write_text(json.dumps({}), encoding='utf-8')
+    with mock.patch.dict(os.environ, env):
+        wa = WebAdmin(str(conf), 'admin', 'secret', str(var),
+                      pw_require_upper=False, pw_require_digit=False)
+        try:
+            store = wa._dcim_store
+            demo.remove(store, var_dir=str(var))         # a leftover of a run that died
+            demo.build(store, var_dir=str(var), lang='en_EN')
+            cat = CatalogStore(store._db)
+            mios = {r['uid']: r for r in cat.list('source = ?', (demo.SOURCE,))}
+            assert {r['tree'] for r in mios.values()} == {
+                'device-types', 'rack-types', 'module-types', 'component-types'}
+            assert all(mios[r['type_uid']]['tree'] == 'rack-types' for r in store.racks.list())
+            partes = store.parts.list()
+            assert len(partes) > 1000
+            assert all(mios[p['type_uid']]['tree'] in ('module-types', 'component-types')
+                       for p in partes)
+            assert len(BuildStore(store._db).list()) == len(demo.BUILDS)
+            with pytest.raises(demo.DemoError):
+                demo.build(store, var_dir=str(var))
+            assert demo.remove(store, var_dir=str(var)) == 6
+            assert not cat.list('source = ?', (demo.SOURCE,))
+            assert not BuildStore(store._db).list()
+            assert not [p for p in PlatformStore(store._db).list() if p['name'] in demo.PLATFORMS]
+            assert not cat.brands.by_slug('demo')
+            assert not store.racks.list() and not store.parts.list() and not store.items.list()
+            assert demo.remove(store, var_dir=str(var)) == 0
+        finally:
+            conn = wa._db_connector
+            try:
+                for t in set(conn.list_tables()) - pre_existing:   # only what WE created
+                    conn.execute(f'DROP TABLE IF EXISTS {conn.quote_ident(t)}')
+                conn.commit()
+            except Exception:                              # pylint: disable=broad-except
+                pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:                          # pylint: disable=broad-except
+                    pass

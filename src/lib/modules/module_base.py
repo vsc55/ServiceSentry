@@ -32,6 +32,7 @@ from lib.modules import ReturnModuleCheck
 from lib.util.dict_files_path import DictFilesPath
 from lib.modules.discovery.schemas import SchemaDiscovery
 from lib.modules.device_binding import DeviceBinding
+from lib.modules.simulated import is_simulated_result, without_simulated
 from lib.core.object_base import ObjectBase
 
 # What is left here is what a check needs from its base: the run loop, config resolution,
@@ -301,7 +302,8 @@ class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
         """ Check if the module is enabled in the configuration. """
         return self.get_conf('enabled', self.module_field_default('enabled'))
 
-    def send_message(self, message, status=None, item='', severity='', kind=''):
+    def send_message(self, message, status=None, item='', severity='', kind='',
+                     simulated=False):
         """
         Bridge function to the send_message function of the Monitor object, checking if the
         Monitor is defined and valid before sending the data.
@@ -319,7 +321,8 @@ class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
         if self.is_monitor_exist:
             # Pass the watchful's name so the notification digest can fill its Module column.
             self._monitor.send_message(message, status, module=self.name_module, item=item,
-                                       severity=severity, kind=kind)
+                                       severity=severity, kind=kind,
+                                       **({'simulated': True} if simulated else {}))
         else:
             self.debug.print(
                 f">> {self.name_module} > send_message: Error, Monitor is not defined!!",
@@ -455,12 +458,16 @@ class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
                 #
                 # Only the collection itself: reading one item's field (`['list', k, 'label']`)
                 # is a module asking about something it has already chosen.
-                if (self.device_scope and len(keys_list) == 2
-                        and keys_list[1] in self._item_collections()
+                if (len(keys_list) == 2 and keys_list[1] in self._item_collections()
                         and isinstance(got, dict)):
-                    return {k: v for k, v in got.items()
-                            if isinstance(v, dict)
-                            and str(v.get('device_uid') or '').strip() == self.device_scope}
+                    # A simulated item is answered by its scenario, never probed: the module
+                    # does not see it, and the monitor adds its answer afterwards
+                    # (`lib.modules.simulated`). Here, for the same reason as the scope.
+                    got = without_simulated(got)
+                    if self.device_scope:
+                        return {k: v for k, v in got.items()
+                                if isinstance(v, dict)
+                                and str(v.get('device_uid') or '').strip() == self.device_scope}
                 return got
 
         if find_key or default_val:
@@ -604,7 +611,12 @@ class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
         changed = (self.check_status_custom(status, key, change_msg) if change_msg is not None
                    else self.check_status(status, self.name_module, key))
         if changed:
-            self.send_message(message, status, item=name, severity=severity or '', kind=kind)
+            # A result a simulation produced (`lib.modules.simulated`: its data carries the
+            # mark) raises its alert marked, and the notifier keeps it from every channel.
+            # Passed only when it is one: a module's own `send_message` may not take it.
+            sim = {'simulated': True} if is_simulated_result(other) else {}
+            self.send_message(message, status, item=name, severity=severity or '', kind=kind,
+                              **sim)
 
     def check_status_custom(self, status, key, status_msg):
         """

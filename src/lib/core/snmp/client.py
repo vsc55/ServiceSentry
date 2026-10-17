@@ -320,6 +320,12 @@ def _utf8_text(val) -> str | None:
     return text if text.isprintable() else None
 
 
+def _simulated_lookup(host):
+    """The simulated agent bound to *host* (`lib.core.snmp.simulated_agent`), or None."""
+    from lib.core.snmp import simulated_agent               # noqa: PLC0415
+    return simulated_agent.lookup(host)
+
+
 class Truncated(str):
     """A walk that stopped at its row ceiling with more rows still to come.
 
@@ -411,6 +417,10 @@ class SnmpClient:
         v3_priv_proto: str = 'DES',
     ) -> tuple:
         """Synchronous SNMP GET wrapping the asyncio API."""
+        # A simulated device (`simulated_agent`): answered from its description, never sent.
+        agent = _simulated_lookup(host)
+        if agent is not None:
+            return agent.get(oid)
         if not _HAS_PYSNMP:
             return None, 'pysnmp is not installed'
 
@@ -493,6 +503,9 @@ class SnmpClient:
         `Truncated` error. It used to come back with no error at all, and a partial table read
         as the whole one — which a store that REPLACES what it held turns into data loss.
         """
+        agent = _simulated_lookup(host)
+        if agent is not None:
+            return agent.walk(oid, max_rows=max_rows or SnmpClient.WALK_MAX_ROWS)
         if not _HAS_PYSNMP:
             return {}, 'pysnmp is not installed'
         root = str(oid or '').strip().lstrip('.')

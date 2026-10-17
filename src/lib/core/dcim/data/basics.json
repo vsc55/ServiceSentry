@@ -2,50 +2,35 @@
   "version": 8,
   "racks": [
     {
-      "model": {
-        "es_ES": "Rack 42U",
-        "en_EN": "Rack 42U"
-      },
+      "model": {"i18n": "generic-rack-rack-42u/model"},
       "u": 42,
       "width": 600,
       "depth": 1000,
       "height": 2000
     },
     {
-      "model": {
-        "es_ES": "Rack 47U",
-        "en_EN": "Rack 47U"
-      },
+      "model": {"i18n": "generic-rack-rack-47u/model"},
       "u": 47,
       "width": 600,
       "depth": 1200,
       "height": 2250
     },
     {
-      "model": {
-        "es_ES": "Rack 24U",
-        "en_EN": "Rack 24U"
-      },
+      "model": {"i18n": "generic-rack-rack-24u/model"},
       "u": 24,
       "width": 600,
       "depth": 800,
       "height": 1200
     },
     {
-      "model": {
-        "es_ES": "Rack 12U mural",
-        "en_EN": "12U wall-mount rack"
-      },
+      "model": {"i18n": "generic-rack-12u-wall-mount-rack/model"},
       "u": 12,
       "width": 600,
       "depth": 600,
       "height": 640
     },
     {
-      "model": {
-        "es_ES": "Rack 9U mural",
-        "en_EN": "9U wall-mount rack"
-      },
+      "model": {"i18n": "generic-rack-9u-wall-mount-rack/model"},
       "u": 9,
       "width": 600,
       "depth": 450,
@@ -54,10 +39,7 @@
   ],
   "devices": [
     {
-      "model": {
-        "es_ES": "Servidor 1U",
-        "en_EN": "1U server"
-      },
+      "model": {"i18n": "generic-1u-server/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -69,10 +51,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Servidor 2U",
-        "en_EN": "2U server"
-      },
+      "model": {"i18n": "generic-2u-server/model"},
       "u": 2,
       "ports": {
         "interfaces": {
@@ -84,10 +63,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Servidor 4U",
-        "en_EN": "4U server"
-      },
+      "model": {"i18n": "generic-4u-server/model"},
       "u": 4,
       "ports": {
         "interfaces": {
@@ -99,10 +75,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Switch 24 puertos",
-        "en_EN": "24-port switch"
-      },
+      "model": {"i18n": "generic-24-port-switch/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -114,10 +87,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Switch 48 puertos",
-        "en_EN": "48-port switch"
-      },
+      "model": {"i18n": "generic-48-port-switch/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -129,10 +99,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Switch 8 puertos",
-        "en_EN": "8-port switch"
-      },
+      "model": {"i18n": "generic-8-port-switch/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -144,10 +111,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Router",
-        "en_EN": "Router"
-      },
+      "model": {"i18n": "generic-router/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -160,10 +124,7 @@
       "kind": "router"
     },
     {
-      "model": {
-        "es_ES": "Cortafuegos",
-        "en_EN": "Firewall"
-      },
+      "model": {"i18n": "generic-firewall/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -176,10 +137,7 @@
       "kind": "firewall"
     },
     {
-      "model": {
-        "es_ES": "Cabina de disco 2U",
-        "en_EN": "2U disk array"
-      },
+      "model": {"i18n": "generic-2u-disk-array/model"},
       "u": 2,
       "ports": {
         "interfaces": {
@@ -192,10 +150,7 @@
       "kind": "storage"
     },
     {
-      "model": {
-        "es_ES": "Panel de parcheo 24",
-        "en_EN": "24-port patch panel"
-      },
+      "model": {"i18n": "generic-24-port-patch-panel/model"},
       "u": 1,
       "ports": {
         "front-ports": {
@@ -208,10 +163,7 @@
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Panel de parcheo 48",
-        "en_EN": "48-port patch panel"
-      },
+      "model": {"i18n": "generic-48-port-patch-panel/model"},
       "u": 2,
       "ports": {
         "front-ports": {
@@ -224,10 +176,7 @@
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Panel de fibra 24",
-        "en_EN": "24-port fibre panel"
-      },
+      "model": {"i18n": "generic-24-port-fibre-panel/model"},
       "u": 1,
       "ports": {
         "front-ports": {
@@ -241,10 +190,7 @@
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Regleta 8 tomas",
-        "en_EN": "8-outlet power strip"
-      },
+      "model": {"i18n": "generic-8-outlet-power-strip/model"},
       "u": 1,
       "ports": {
         "power-outlets": {
@@ -256,10 +202,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Regleta 16 tomas",
-        "en_EN": "16-outlet power strip"
-      },
+      "model": {"i18n": "generic-16-outlet-power-strip/model"},
       "u": 1,
       "ports": {
         "power-outlets": {
@@ -271,10 +214,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "Regleta vertical 24 tomas",
-        "en_EN": "24-outlet vertical power strip"
-      },
+      "model": {"i18n": "generic-24-outlet-vertical-power-strip/model"},
       "u": 0,
       "ports": {
         "power-outlets": {
@@ -286,10 +226,7 @@
       }
     },
     {
-      "model": {
-        "es_ES": "SAI 1U",
-        "en_EN": "1U UPS"
-      },
+      "model": {"i18n": "generic-1u-ups/model"},
       "u": 1,
       "ports": {
         "power-outlets": {
@@ -302,10 +239,7 @@
       "kind": "ups"
     },
     {
-      "model": {
-        "es_ES": "SAI 2U",
-        "en_EN": "2U UPS"
-      },
+      "model": {"i18n": "generic-2u-ups/model"},
       "u": 2,
       "ports": {
         "power-outlets": {
@@ -318,10 +252,7 @@
       "kind": "ups"
     },
     {
-      "model": {
-        "es_ES": "SAI 3U",
-        "en_EN": "3U UPS"
-      },
+      "model": {"i18n": "generic-3u-ups/model"},
       "u": 3,
       "ports": {
         "power-outlets": {
@@ -334,84 +265,57 @@
       "kind": "ups"
     },
     {
-      "model": {
-        "es_ES": "Bandeja voladiza 1U",
-        "en_EN": "1U cantilever shelf"
-      },
+      "model": {"i18n": "generic-1u-cantilever-shelf/model"},
       "u": 1,
       "kind": "shelf",
       "powered": false,
       "full_depth": false
     },
     {
-      "model": {
-        "es_ES": "Bandeja voladiza 2U",
-        "en_EN": "2U cantilever shelf"
-      },
+      "model": {"i18n": "generic-2u-cantilever-shelf/model"},
       "u": 2,
       "kind": "shelf",
       "powered": false,
       "full_depth": false
     },
     {
-      "model": {
-        "es_ES": "Bandeja fija 1U (4 puntos)",
-        "en_EN": "1U fixed shelf (4-post)"
-      },
+      "model": {"i18n": "generic-1u-fixed-shelf-4-post/model"},
       "u": 1,
       "kind": "shelf",
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Bandeja fija 2U (4 puntos)",
-        "en_EN": "2U fixed shelf (4-post)"
-      },
+      "model": {"i18n": "generic-2u-fixed-shelf-4-post/model"},
       "u": 2,
       "kind": "shelf",
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Bandeja deslizante 1U",
-        "en_EN": "1U sliding shelf"
-      },
+      "model": {"i18n": "generic-1u-sliding-shelf/model"},
       "u": 1,
       "kind": "shelf",
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Tapa ciega 1U",
-        "en_EN": "1U blanking plate"
-      },
+      "model": {"i18n": "generic-1u-blanking-plate/model"},
       "u": 1,
       "kind": "blank",
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Tapa ciega 2U",
-        "en_EN": "2U blanking plate"
-      },
+      "model": {"i18n": "generic-2u-blanking-plate/model"},
       "u": 2,
       "kind": "blank",
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "Cajetín pasahilos",
-        "en_EN": "Cable management panel"
-      },
+      "model": {"i18n": "generic-cable-management-panel/model"},
       "u": 1,
       "kind": "other",
       "powered": false
     },
     {
-      "model": {
-        "es_ES": "KVM de consola",
-        "en_EN": "Console KVM"
-      },
+      "model": {"i18n": "generic-console-kvm/model"},
       "u": 1,
       "ports": {
         "interfaces": {
@@ -424,56 +328,35 @@
       "kind": "kvm"
     },
     {
-      "model": {
-        "es_ES": "Torno trípode",
-        "en_EN": "Tripod turnstile"
-      },
+      "model": {"i18n": "generic-tripod-turnstile/model"},
       "u": 0,
       "full_depth": false,
       "kind": "turnstile",
-      "description": {
-        "es_ES": "Torno de control de acceso de tres brazos, con lector.",
-        "en_EN": "Three-arm access control turnstile, with a reader."
-      }
+      "description": {"i18n": "generic-tripod-turnstile/description"}
     },
     {
-      "model": {
-        "es_ES": "Puerta de enlace de accesos",
-        "en_EN": "Access gateway"
-      },
+      "model": {"i18n": "generic-access-gateway/model"},
       "u": 0,
       "full_depth": false,
       "kind": "access_gateway",
-      "description": {
-        "es_ES": "Puerta de enlace a la que se conectan las cerraduras y los lectores.",
-        "en_EN": "Gateway the locks and readers connect to."
-      }
+      "description": {"i18n": "generic-access-gateway/description"}
     },
     {
-      "model": {
-        "es_ES": "Cilindro electrónico",
-        "en_EN": "Electronic cylinder"
-      },
+      "model": {"i18n": "generic-electronic-cylinder/model"},
       "u": 0,
       "full_depth": false,
       "powered": false,
       "kind": "access_lock"
     },
     {
-      "model": {
-        "es_ES": "Cerradura de taquilla",
-        "en_EN": "Locker lock"
-      },
+      "model": {"i18n": "generic-locker-lock/model"},
       "u": 0,
       "full_depth": false,
       "powered": false,
       "kind": "access_lock"
     },
     {
-      "model": {
-        "es_ES": "Lector de pared",
-        "en_EN": "Wall reader"
-      },
+      "model": {"i18n": "generic-wall-reader/model"},
       "u": 0,
       "full_depth": false,
       "kind": "access_reader"
@@ -487,28 +370,16 @@
       "url": "https://saltosystems.com/es-es/productos/iq/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/solution-products/salto-ks-products-iq-hardware.png?itok=lCAJ8Xz-",
       "image_svg": "salto-iq-2-0.svg",
-      "description": {
-        "es_ES": "Puerta de enlace de Salto KS: conecta las cerraduras inalámbricas de hasta 16 puertas con la nube de Salto KS.",
-        "en_EN": "Salto KS gateway: connects the wireless locks of up to 16 doors to the Salto KS cloud."
-      },
+      "description": {"i18n": "salto-iq-2-0/description"},
       "power_type": "external",
       "specs": {
         "max_doors": "16",
         "radio": "IEEE 802.15.4 2,4 GHz (ZigBee) · Bluetooth",
         "range_indoor": "10–15 m",
-        "uplink": {
-          "es_ES": "Ethernet; también Wi-Fi, PoE o red móvil 2G/3G/4G",
-          "en_EN": "Ethernet; also Wi-Fi, PoE or 2G/3G/4G mobile"
-        },
-        "power": {
-          "es_ES": "12 V · 800 mA, con adaptador y cable de 3 m",
-          "en_EN": "12 V · 800 mA, with adapter and 3 m cable"
-        },
+        "uplink": {"i18n": "salto-iq-2-0/specs/uplink"},
+        "power": {"i18n": "salto-iq-2-0/specs/power"},
         "temperature": "0–40 °C",
-        "security": {
-          "es_ES": "AES de 128 bits · TLS · firmware por el aire (OTA)",
-          "en_EN": "128-bit AES · TLS · over-the-air firmware (OTA)"
-        },
+        "security": {"i18n": "salto-iq-2-0/specs/security"},
         "certifications": "CE, UKCA, EAC, CMI, SRRC, NCC, IMDA, TDRA, CMIM, SUBTEL, NTRA, NOM, CRA, MPT, NBTC"
       }
     },
@@ -521,20 +392,11 @@
       "url": "https://saltosystems.com/es-es/productos/cilindros-electronicos/cilindro-neo/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/neo-cylinder-list-ok.png?itok=Wmhb0KIJ",
       "image_svg": "salto-neo-cylinder.svg",
-      "description": {
-        "es_ES": "Cilindro electrónico inalámbrico de pilas.",
-        "en_EN": "Battery-powered wireless electronic cylinder."
-      },
+      "description": {"i18n": "salto-neo-cylinder/description"},
       "powered": false,
       "specs": {
-        "variants": {
-          "es_ES": "Europeo · medio cilindro para armarios rack · cerradura de levas (la leva gira de 90 a 180°)",
-          "en_EN": "Euro profile · half cylinder for rack cabinets · cam lock (the cam turns 90 to 180°)"
-        },
-        "power": {
-          "es_ES": "Pilas",
-          "en_EN": "Batteries"
-        }
+        "variants": {"i18n": "salto-neo-cylinder/specs/variants"},
+        "power": {"i18n": "salto-neo-cylinder/specs/power"}
       }
     },
     {
@@ -546,17 +408,11 @@
       "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-one/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-one-list-ok.png?itok=27oXgqyn",
       "image_svg": "salto-xs4-one.svg",
-      "description": {
-        "es_ES": "Escudo electrónico inalámbrico para puertas.",
-        "en_EN": "Wireless electronic escutcheon for doors."
-      },
+      "description": {"i18n": "salto-xs4-one/description"},
       "powered": false,
       "specs": {
         "variants": "EU · S Euro · S Heavy Duty · S Double Reader · S Wide · S Keypad · DIN · S DIN · S Double Reader DIN",
-        "standards": {
-          "es_ES": "Heavy Duty: EN 1627 RC3 · DIN: puertas DIN 18250/18251, conserva la resistencia al fuego",
-          "en_EN": "Heavy Duty: EN 1627 RC3 · DIN: DIN 18250/18251 doors, keeps the fire rating"
-        }
+        "standards": {"i18n": "salto-xs4-one/specs/standards"}
       }
     },
     {
@@ -568,10 +424,7 @@
       "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-original/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-original-plus-euro-list-ok.png?itok=FpdzFuwt",
       "image_svg": "salto-xs4-original.svg",
-      "description": {
-        "es_ES": "Escudo electrónico de la gama XS4.",
-        "en_EN": "Electronic escutcheon of the XS4 range."
-      },
+      "description": {"i18n": "salto-xs4-original/description"},
       "powered": false
     },
     {
@@ -583,10 +436,7 @@
       "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-mini/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-mini-list-ok.png?itok=T2ZUbyUF",
       "image_svg": "salto-xs4-mini.svg",
-      "description": {
-        "es_ES": "Escudo electrónico compacto de la gama XS4.",
-        "en_EN": "Compact electronic escutcheon of the XS4 range."
-      },
+      "description": {"i18n": "salto-xs4-mini/description"},
       "powered": false
     },
     {
@@ -598,20 +448,11 @@
       "url": "https://saltosystems.com/es-es/productos/electronic-locker-locks/xs4-locker/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-locker-list-ok.png?itok=uNThdvMJ",
       "image_svg": "salto-xs4-locker.svg",
-      "description": {
-        "es_ES": "Cerradura electrónica inalámbrica para taquillas, armarios, cajas fuertes y maletines; se abre con la tarjeta.",
-        "en_EN": "Wireless electronic lock for lockers, cabinets, safes and cases; opened with the card."
-      },
+      "description": {"i18n": "salto-xs4-locker/description"},
       "powered": false,
       "specs": {
-        "credentials": {
-          "es_ES": "Tarjeta",
-          "en_EN": "Card"
-        },
-        "uplink": {
-          "es_ES": "Red virtual Salto (SVN), sin cables",
-          "en_EN": "Salto virtual network (SVN), no wiring"
-        }
+        "credentials": {"i18n": "salto-xs4-locker/specs/credentials"},
+        "uplink": {"i18n": "salto-xs4-locker/specs/uplink"}
       }
     },
     {
@@ -623,10 +464,7 @@
       "url": "https://saltosystems.com/es-es/productos/electronic-padlocks/candado-neoxx/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/neoxx-padlock-list-ok.png?itok=fDWlC_z6",
       "image_svg": "salto-neoxx-padlock.svg",
-      "description": {
-        "es_ES": "Candado electrónico.",
-        "en_EN": "Electronic padlock."
-      },
+      "description": {"i18n": "salto-neoxx-padlock/description"},
       "powered": false
     },
     {
@@ -638,10 +476,7 @@
       "url": "https://saltosystems.com/es-es/productos/electronic-locker-locks/gantner-net-lock/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/gat-net-lock-list-ok.png?itok=Orx9xkNM",
       "image_svg": "gantner-net-lock.svg",
-      "description": {
-        "es_ES": "Cerradura electrónica para taquillas.",
-        "en_EN": "Electronic locker lock."
-      },
+      "description": {"i18n": "gantner-net-lock/description"},
       "powered": false
     },
     {
@@ -653,15 +488,9 @@
       "url": "https://saltosystems.com/es-es/productos/wall-readers/lector-diseno-xs/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/design-xs-reader-list-ok.png?itok=BHM650FK",
       "image_svg": "salto-design-xs-reader.svg",
-      "description": {
-        "es_ES": "Lector de pared para cajas eléctricas estándar; con las controladoras de Salto abre ascensores, puertas correderas y puertas motorizadas.",
-        "en_EN": "Wall reader for standard electrical boxes; with Salto controllers it opens lifts, sliding doors and motorised doors."
-      },
+      "description": {"i18n": "salto-design-xs-reader/description"},
       "specs": {
-        "variants": {
-          "es_ES": "Europeo · con teclado (PIN, doble autenticación) · Mullion, empotrado en perfiles estrechos",
-          "en_EN": "Euro · with keypad (PIN, two-factor) · Mullion, flush in narrow frames"
-        }
+        "variants": {"i18n": "salto-design-xs-reader/specs/variants"}
       }
     },
     {
@@ -673,10 +502,7 @@
       "url": "https://saltosystems.com/es-es/productos/wall-readers/lector-glass-xs/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/glass-xs-reader-list-ok.png?itok=8BRCFNDf",
       "image_svg": "salto-glass-xs-reader.svg",
-      "description": {
-        "es_ES": "Lector de pared de la gama XS.",
-        "en_EN": "Wall reader of the XS range."
-      }
+      "description": {"i18n": "salto-glass-xs-reader/description"}
     },
     {
       "maker": "Salto",
@@ -687,51 +513,30 @@
       "url": "https://saltosystems.com/es-es/productos/controladoras-cus/controlador-de-puertas-bluenet/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/bluenet-door-controller-list-ok.png?itok=zy34MXBN",
       "image_svg": "salto-bluenet-door-controller.svg",
-      "description": {
-        "es_ES": "Controladora de puerta compacta en carril DIN, con relés y entradas, para puertas automáticas y cualquier punto de acceso.",
-        "en_EN": "Compact DIN-rail door controller, with relays and inputs, for automatic doors and any access point."
-      },
+      "description": {"i18n": "salto-bluenet-door-controller/description"},
       "specs": {
         "uplink": "BLUEnet",
-        "mounting": {
-          "es_ES": "Carril DIN",
-          "en_EN": "DIN rail"
-        },
-        "relays": {
-          "es_ES": "Relés y entradas; placa de ampliación de 4 relés; unidad de salida con conexión para un segundo lector",
-          "en_EN": "Relays and inputs; 4-relay expansion board; exit unit with a connection for a second reader"
-        }
+        "mounting": {"i18n": "salto-bluenet-door-controller/specs/mounting"},
+        "relays": {"i18n": "salto-bluenet-door-controller/specs/relays"}
       }
     }
   ],
   "modules": [
     {
-      "model": {
-        "es_ES": "Transceptor SFP 1G",
-        "en_EN": "1G SFP transceiver"
-      },
+      "model": {"i18n": "generic-sfp-1g/model"},
       "slug": "generic-sfp-1g"
     },
     {
-      "model": {
-        "es_ES": "Transceptor SFP+ 10G",
-        "en_EN": "10G SFP+ transceiver"
-      },
+      "model": {"i18n": "generic-sfpp-10g/model"},
       "slug": "generic-sfpp-10g"
     },
     {
-      "model": {
-        "es_ES": "Fuente redundante",
-        "en_EN": "Redundant power supply"
-      },
+      "model": {"i18n": "generic-psu/model"},
       "slug": "generic-psu",
       "kind": "psu"
     },
     {
-      "model": {
-        "es_ES": "Tarjeta de red 4x1G",
-        "en_EN": "4x1G network card"
-      },
+      "model": {"i18n": "generic-nic-4x1g/model"},
       "slug": "generic-nic-4x1g",
       "kind": "nic"
     }
@@ -747,10 +552,7 @@
         "eol": "2025-10-14",
         "launched": "2015-07-29"
       },
-      "notes": {
-        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
-        "en_EN": "Date for 22H2, which is the last Windows 10 version."
-      }
+      "notes": {"i18n": "platform/windows-10-home/notes"}
     },
     {
       "name": "Windows 10 Pro",
@@ -762,10 +564,7 @@
         "eol": "2025-10-14",
         "launched": "2015-07-29"
       },
-      "notes": {
-        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
-        "en_EN": "Date for 22H2, which is the last Windows 10 version."
-      }
+      "notes": {"i18n": "platform/windows-10-pro/notes"}
     },
     {
       "name": "Windows 10 Enterprise",
@@ -777,10 +576,7 @@
         "eol": "2025-10-14",
         "launched": "2015-07-29"
       },
-      "notes": {
-        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
-        "en_EN": "Date for 22H2, which is the last Windows 10 version."
-      }
+      "notes": {"i18n": "platform/windows-10-enterprise/notes"}
     },
     {
       "name": "Windows 10 Education",
@@ -792,10 +588,7 @@
         "eol": "2025-10-14",
         "launched": "2015-07-29"
       },
-      "notes": {
-        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
-        "en_EN": "Date for 22H2, which is the last Windows 10 version."
-      }
+      "notes": {"i18n": "platform/windows-10-education/notes"}
     },
     {
       "name": "Windows 10 IoT Enterprise",
@@ -807,10 +600,7 @@
         "eol": "2025-10-14",
         "launched": "2015-07-29"
       },
-      "notes": {
-        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
-        "en_EN": "Date for 22H2, which is the last Windows 10 version."
-      }
+      "notes": {"i18n": "platform/windows-10-iot-enterprise/notes"}
     },
     {
       "name": "Windows 10 Enterprise LTSC",
@@ -823,10 +613,7 @@
         "eol": "2027-01-12",
         "launched": "2021-11-16"
       },
-      "notes": {
-        "es_ES": "Fechas de la LTSC 2021, la última de Windows 10.",
-        "en_EN": "Dates for LTSC 2021, the last Windows 10 LTSC."
-      }
+      "notes": {"i18n": "platform/windows-10-enterprise-ltsc/notes"}
     },
     {
       "name": "Windows 10 IoT Enterprise LTSC",
@@ -839,10 +626,7 @@
         "eol": "2032-01-13",
         "launched": "2021-11-16"
       },
-      "notes": {
-        "es_ES": "La IoT LTSC 2021 tiene diez años, no cinco: es la que se pone en un equipo que no se va a tocar.",
-        "en_EN": "IoT LTSC 2021 runs ten years, not five: it is what goes on a machine nobody is going to touch."
-      }
+      "notes": {"i18n": "platform/windows-10-iot-enterprise-ltsc/notes"}
     },
     {
       "name": "Windows 11 Home",
@@ -852,10 +636,7 @@
       "extra": {
         "launched": "2021-10-05"
       },
-      "notes": {
-        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
-        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
-      }
+      "notes": {"i18n": "platform/windows-11-home/notes"}
     },
     {
       "name": "Windows 11 Pro",
@@ -865,10 +646,7 @@
       "extra": {
         "launched": "2021-10-05"
       },
-      "notes": {
-        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
-        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
-      }
+      "notes": {"i18n": "platform/windows-11-pro/notes"}
     },
     {
       "name": "Windows 11 Enterprise",
@@ -878,10 +656,7 @@
       "extra": {
         "launched": "2021-10-05"
       },
-      "notes": {
-        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
-        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
-      }
+      "notes": {"i18n": "platform/windows-11-enterprise/notes"}
     },
     {
       "name": "Windows 11 Education",
@@ -891,10 +666,7 @@
       "extra": {
         "launched": "2021-10-05"
       },
-      "notes": {
-        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
-        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
-      }
+      "notes": {"i18n": "platform/windows-11-education/notes"}
     },
     {
       "name": "Windows 11 IoT Enterprise",
@@ -904,10 +676,7 @@
       "extra": {
         "launched": "2021-10-05"
       },
-      "notes": {
-        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
-        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
-      }
+      "notes": {"i18n": "platform/windows-11-iot-enterprise/notes"}
     },
     {
       "name": "Windows 11 Enterprise LTSC",
@@ -919,10 +688,7 @@
         "eol": "2029-10-09",
         "launched": "2024-10-01"
       },
-      "notes": {
-        "es_ES": "Fechas de la LTSC 2024.",
-        "en_EN": "Dates for LTSC 2024."
-      }
+      "notes": {"i18n": "platform/windows-11-enterprise-ltsc/notes"}
     },
     {
       "name": "Windows 11 IoT Enterprise LTSC",
@@ -934,10 +700,7 @@
         "eol": "2034-10-10",
         "launched": "2024-10-01"
       },
-      "notes": {
-        "es_ES": "La IoT LTSC 2024 tiene diez años.",
-        "en_EN": "IoT LTSC 2024 runs ten years."
-      }
+      "notes": {"i18n": "platform/windows-11-iot-enterprise-ltsc/notes"}
     },
     {
       "name": "Windows Server 2012 R2 Standard",
@@ -949,10 +712,7 @@
         "eol": "2023-10-10",
         "launched": "2013-11-25"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2012-r2-standard/notes"}
     },
     {
       "name": "Windows Server 2012 R2 Datacenter",
@@ -964,10 +724,7 @@
         "eol": "2023-10-10",
         "launched": "2013-11-25"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2012-r2-datacenter/notes"}
     },
     {
       "name": "Windows Server 2016 Standard",
@@ -979,10 +736,7 @@
         "eol": "2027-01-12",
         "launched": "2016-10-15"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2016-standard/notes"}
     },
     {
       "name": "Windows Server 2016 Datacenter",
@@ -994,10 +748,7 @@
         "eol": "2027-01-12",
         "launched": "2016-10-15"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2016-datacenter/notes"}
     },
     {
       "name": "Windows Server 2019 Standard",
@@ -1009,10 +760,7 @@
         "eol": "2029-01-09",
         "launched": "2018-11-13"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2019-standard/notes"}
     },
     {
       "name": "Windows Server 2019 Datacenter",
@@ -1024,10 +772,7 @@
         "eol": "2029-01-09",
         "launched": "2018-11-13"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2019-datacenter/notes"}
     },
     {
       "name": "Windows Server 2022 Standard",
@@ -1039,10 +784,7 @@
         "eol": "2031-10-14",
         "launched": "2021-08-18"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2022-standard/notes"}
     },
     {
       "name": "Windows Server 2022 Datacenter",
@@ -1054,10 +796,7 @@
         "eol": "2031-10-14",
         "launched": "2021-08-18"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2022-datacenter/notes"}
     },
     {
       "name": "Windows Server 2025 Standard",
@@ -1069,10 +808,7 @@
         "eol": "2034-10-10",
         "launched": "2024-11-01"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2025-standard/notes"}
     },
     {
       "name": "Windows Server 2025 Datacenter",
@@ -1084,10 +820,7 @@
         "eol": "2034-10-10",
         "launched": "2024-11-01"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
-        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
-      }
+      "notes": {"i18n": "platform/windows-server-2025-datacenter/notes"}
     },
     {
       "name": "Debian 10",
@@ -1099,10 +832,7 @@
         "eol": "2024-06-30",
         "launched": "2019-07-06"
       },
-      "notes": {
-        "es_ES": "\"Fin de parches\" es el del equipo de seguridad; \"fin de soporte\", el de Debian LTS.",
-        "en_EN": "\"End of security updates\" is the security team's; \"end of support\", Debian LTS's."
-      }
+      "notes": {"i18n": "platform/debian-10/notes"}
     },
     {
       "name": "Debian 11",
@@ -1114,10 +844,7 @@
         "eol": "2026-08-31",
         "launched": "2021-08-14"
       },
-      "notes": {
-        "es_ES": "\"Fin de parches\" es el del equipo de seguridad; \"fin de soporte\", el de Debian LTS.",
-        "en_EN": "\"End of security updates\" is the security team's; \"end of support\", Debian LTS's."
-      }
+      "notes": {"i18n": "platform/debian-11/notes"}
     },
     {
       "name": "Debian 12",
@@ -1129,10 +856,7 @@
         "eol": "2028-06-30",
         "launched": "2023-06-10"
       },
-      "notes": {
-        "es_ES": "\"Fin de parches\" es el del equipo de seguridad; \"fin de soporte\", el de Debian LTS.",
-        "en_EN": "\"End of security updates\" is the security team's; \"end of support\", Debian LTS's."
-      }
+      "notes": {"i18n": "platform/debian-12/notes"}
     },
     {
       "name": "Debian 13",
@@ -1143,10 +867,7 @@
         "eol": "2030-06-30",
         "launched": "2025-08-09"
       },
-      "notes": {
-        "es_ES": "El fin de LTS lo publica el proyecto; el del equipo de seguridad se fija un año después de que salga la siguiente.",
-        "en_EN": "The LTS end is published by the project; the security team's is set one year after the next release ships."
-      }
+      "notes": {"i18n": "platform/debian-13/notes"}
     },
     {
       "name": "Ubuntu 20.04 LTS",
@@ -1158,10 +879,7 @@
         "eol": "2030-04-30",
         "launched": "2020-04-23"
       },
-      "notes": {
-        "es_ES": "\"Fin de parches\" es el mantenimiento estándar (cinco años); \"fin de soporte\", el de Ubuntu Pro / ESM (diez).",
-        "en_EN": "\"End of security updates\" is standard maintenance (five years); \"end of support\", Ubuntu Pro / ESM (ten)."
-      }
+      "notes": {"i18n": "platform/ubuntu-20-04-lts/notes"}
     },
     {
       "name": "Ubuntu 22.04 LTS",
@@ -1173,10 +891,7 @@
         "eol": "2032-04-01",
         "launched": "2022-04-21"
       },
-      "notes": {
-        "es_ES": "\"Fin de parches\" es el mantenimiento estándar (cinco años); \"fin de soporte\", el de Ubuntu Pro / ESM (diez).",
-        "en_EN": "\"End of security updates\" is standard maintenance (five years); \"end of support\", Ubuntu Pro / ESM (ten)."
-      }
+      "notes": {"i18n": "platform/ubuntu-22-04-lts/notes"}
     },
     {
       "name": "Ubuntu 24.04 LTS",
@@ -1188,10 +903,7 @@
         "eol": "2034-04-25",
         "launched": "2024-04-25"
       },
-      "notes": {
-        "es_ES": "\"Fin de parches\" es el mantenimiento estándar (cinco años); \"fin de soporte\", el de Ubuntu Pro / ESM (diez).",
-        "en_EN": "\"End of security updates\" is standard maintenance (five years); \"end of support\", Ubuntu Pro / ESM (ten)."
-      }
+      "notes": {"i18n": "platform/ubuntu-24-04-lts/notes"}
     },
     {
       "name": "Ubuntu 26.04 LTS",
@@ -1203,10 +915,7 @@
         "eol": "2036-04-01",
         "launched": "2026-04-23"
       },
-      "notes": {
-        "es_ES": "Fechas de la política de LTS —cinco años, y diez con Pro— sobre la fecha de lanzamiento prevista. Ajústalas si Canonical las mueve.",
-        "en_EN": "Dates from the LTS policy — five years, ten with Pro — applied to the scheduled release date. Adjust them if Canonical moves them."
-      }
+      "notes": {"i18n": "platform/ubuntu-26-04-lts/notes"}
     },
     {
       "name": "Proxmox VE 6",
@@ -1217,10 +926,7 @@
         "eol": "2022-07-31",
         "launched": "2019-07-16"
       },
-      "notes": {
-        "es_ES": "Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
-        "en_EN": "Each Proxmox rides the Debian of its day and ends with it: the end of support is announced when the next one ships."
-      }
+      "notes": {"i18n": "platform/proxmox-ve-6/notes"}
     },
     {
       "name": "Proxmox VE 7",
@@ -1231,10 +937,7 @@
         "eol": "2024-07-31",
         "launched": "2021-07-06"
       },
-      "notes": {
-        "es_ES": "Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
-        "en_EN": "Each Proxmox rides the Debian of its day and ends with it: the end of support is announced when the next one ships."
-      }
+      "notes": {"i18n": "platform/proxmox-ve-7/notes"}
     },
     {
       "name": "Proxmox VE 8",
@@ -1245,10 +948,7 @@
         "eol": "2026-07-31",
         "launched": "2023-06-22"
       },
-      "notes": {
-        "es_ES": "Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
-        "en_EN": "Each Proxmox rides the Debian of its day and ends with it: the end of support is announced when the next one ships."
-      }
+      "notes": {"i18n": "platform/proxmox-ve-8/notes"}
     },
     {
       "name": "Proxmox VE 9",
@@ -1258,10 +958,7 @@
       "extra": {
         "launched": "2025-08-05"
       },
-      "notes": {
-        "es_ES": "Su fin de soporte se anunciará al salir la siguiente. Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
-        "en_EN": "Its end of support will be announced when the next one ships. Each Proxmox rides the Debian of its day and ends with it."
-      }
+      "notes": {"i18n": "platform/proxmox-ve-9/notes"}
     },
     {
       "name": "VMware ESXi 6.0",
@@ -1273,10 +970,7 @@
         "eol": "2022-03-12",
         "launched": "2015-03-12"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
-        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
-      }
+      "notes": {"i18n": "platform/vmware-esxi-6-0/notes"}
     },
     {
       "name": "VMware ESXi 6.5",
@@ -1288,10 +982,7 @@
         "eol": "2023-11-15",
         "launched": "2016-11-15"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
-        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
-      }
+      "notes": {"i18n": "platform/vmware-esxi-6-5/notes"}
     },
     {
       "name": "VMware ESXi 6.7",
@@ -1303,10 +994,7 @@
         "eol": "2023-11-15",
         "launched": "2018-04-17"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
-        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
-      }
+      "notes": {"i18n": "platform/vmware-esxi-6-7/notes"}
     },
     {
       "name": "VMware ESXi 7.0",
@@ -1318,10 +1006,7 @@
         "eol": "2027-04-02",
         "launched": "2020-04-02"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
-        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
-      }
+      "notes": {"i18n": "platform/vmware-esxi-7-0/notes"}
     },
     {
       "name": "VMware ESXi 8.0",
@@ -1333,10 +1018,7 @@
         "eol": "2029-10-11",
         "launched": "2022-10-11"
       },
-      "notes": {
-        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
-        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
-      }
+      "notes": {"i18n": "platform/vmware-esxi-8-0/notes"}
     },
     {
       "name": "VMware ESXi 9.0",
@@ -1346,10 +1028,7 @@
       "extra": {
         "launched": "2025-06-17"
       },
-      "notes": {
-        "es_ES": "Broadcom publica sus fechas en la matriz de ciclo de vida; escríbelas cuando las fije. \"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
-        "en_EN": "Broadcom publishes its dates in the lifecycle matrix; write them down once they are set. \"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance."
-      }
+      "notes": {"i18n": "platform/vmware-esxi-9-0/notes"}
     },
     {
       "name": "Synology DSM 6.0",
@@ -1359,10 +1038,7 @@
       "extra": {
         "launched": "2016-03-23"
       },
-      "notes": {
-        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
-        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
-      }
+      "notes": {"i18n": "platform/synology-dsm-6-0/notes"}
     },
     {
       "name": "Synology DSM 6.1",
@@ -1372,10 +1048,7 @@
       "extra": {
         "launched": "2017-02-22"
       },
-      "notes": {
-        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
-        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
-      }
+      "notes": {"i18n": "platform/synology-dsm-6-1/notes"}
     },
     {
       "name": "Synology DSM 6.2",
@@ -1385,10 +1058,7 @@
       "extra": {
         "launched": "2018-05-24"
       },
-      "notes": {
-        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
-        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
-      }
+      "notes": {"i18n": "platform/synology-dsm-6-2/notes"}
     },
     {
       "name": "Synology DSM 7.0",
@@ -1398,10 +1068,7 @@
       "extra": {
         "launched": "2021-06-29"
       },
-      "notes": {
-        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
-        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
-      }
+      "notes": {"i18n": "platform/synology-dsm-7-0/notes"}
     },
     {
       "name": "Synology DSM 7.1",
@@ -1411,10 +1078,7 @@
       "extra": {
         "launched": "2022-05-17"
       },
-      "notes": {
-        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
-        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
-      }
+      "notes": {"i18n": "platform/synology-dsm-7-1/notes"}
     },
     {
       "name": "Synology DSM 7.2",
@@ -1424,10 +1088,7 @@
       "extra": {
         "launched": "2023-05-17"
       },
-      "notes": {
-        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
-        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
-      }
+      "notes": {"i18n": "platform/synology-dsm-7-2/notes"}
     },
     {
       "name": "RouterOS 6",
@@ -1437,10 +1098,7 @@
       "extra": {
         "launched": "2013-05-20"
       },
-      "notes": {
-        "es_ES": "MikroTik no publica un fin por versión: la 6 y la 7 conviven y las dos siguen recibiendo builds. Escribe la tuya si tu contrato dice otra cosa.",
-        "en_EN": "MikroTik publishes no per-version end: 6 and 7 coexist and both still get builds. Write down yours if your contract says otherwise."
-      }
+      "notes": {"i18n": "platform/routeros-6/notes"}
     },
     {
       "name": "RouterOS 7",
@@ -1450,30 +1108,21 @@
       "extra": {
         "launched": "2021-11-17"
       },
-      "notes": {
-        "es_ES": "MikroTik no publica un fin por versión: la 6 y la 7 conviven y las dos siguen recibiendo builds. Escribe la tuya si tu contrato dice otra cosa.",
-        "en_EN": "MikroTik publishes no per-version end: 6 and 7 coexist and both still get builds. Write down yours if your contract says otherwise."
-      }
+      "notes": {"i18n": "platform/routeros-7/notes"}
     },
     {
       "name": "Linksys (firmware de fábrica)",
       "kind": "firmware",
       "brand": "Linksys",
       "family": "Linksys",
-      "notes": {
-        "es_ES": "El fin de soporte no es de la versión sino del modelo que la corre: escríbelo cuando lo publiquen para el tuyo.",
-        "en_EN": "The end of support belongs to the model, not the version: write it down once it is published for yours."
-      }
+      "notes": {"i18n": "platform/linksys-firmware-de-f-brica/notes"}
     },
     {
       "name": "OpenWrt",
       "kind": "firmware",
       "brand": "OpenWrt",
       "family": "OpenWrt",
-      "notes": {
-        "es_ES": "La versión y su fin de soporte dependen de la rama; escríbelos.",
-        "en_EN": "The version and its end of support depend on the branch; write them down."
-      }
+      "notes": {"i18n": "platform/openwrt/notes"}
     }
   ]
 }

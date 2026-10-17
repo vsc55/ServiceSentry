@@ -216,15 +216,124 @@ function _dcCompClose() {
     renderDcim();
 }
 
-/** Los modelos de componente que casan con lo buscado. Contra el árbol de componentes y no
- *  contra el catálogo entero: aquí no se busca un switch. */
+/** Los modelos que casan con lo buscado: los de **componente** siempre, y los de **módulo** —una
+ *  fuente, un ventilador, un transceptor, una tarjeta OCP, una controladora— cuando el equipo
+ *  tiene alguna bahía que los admite. Contra esos dos árboles y no contra el catálogo entero:
+ *  aquí no se busca un switch.
+ *
+ *  Solo componentes era que lo que viene montado de fábrica —la fuente que estampó la plantilla—
+ *  no se podía volver a elegir: se quitaba una fuente y para ponerla otra vez había que
+ *  escribirla a mano, que es de donde salen dos nombres para el mismo modelo.
+ *
+ *  Y **por la bahía**: con una elegida (se pulsó en ella), solo lo que cabe en ella; sin ninguna,
+ *  los módulos que caben en alguna de las suyas (`_dcCompFit`). */
 async function _dcCompSearch() {
     const d = _dcCompDraft;
     if (!d) return;
-    const r = await apiGet('/api/v1/dcim/catalog?tree=component-types'
-                           + `&q=${encodeURIComponent(d.q || '')}`) || {};
-    d.rows = r.types || [];
+    const q = `&q=${encodeURIComponent(d.q || '')}`;
+    const conModulos = _dcCompBaysAll().some(b => _dcBayTakesModules(b));
+    const [comp, mods] = await Promise.all([
+        apiGet('/api/v1/dcim/catalog?tree=component-types' + q),
+        conModulos ? apiGet('/api/v1/dcim/catalog?tree=module-types' + q) : null]);
+    if (_dcCompDraft !== d) return;           // otra pieza empezada mientras llegaba
+    d.rows = _dcCompFit(((comp || {}).types || []).concat((mods || {}).types || []));
     renderDcim();
+}
+
+//: **Qué admite cada clase de bahía**, con las palabras del catálogo: el tipo de la bahía (los de
+//: `connectors.json`, grupo `bay`) → las clases que entran en ella. Son las mismas palabras para
+//: un módulo (su clase del catálogo) y para un componente (la clase de la pieza): una fuente es
+//: `psu` en los dos. `kinds: null` = cualquiera —una bahía de módulo genérica—; `modules: false`
+//: = ningún módulo, solo componentes —en una bahía de disco entra un disco, no una tarjeta—.
+//: Una bahía sin tipo, o de uno que esta tabla no conoce, admite cualquier cosa, como siempre.
+//: Una prueba exige una fila por cada tipo de bahía de módulo del documento de conectores.
+const _DC_BAY_TAKES = {
+    'psu-bay':    {kinds: ['psu'], modules: true},
+    'fan-bay':    {kinds: ['fan'], modules: true},
+    'sfp-cage':   {kinds: ['transceiver'], modules: true},
+    'drive-bay':  {kinds: ['disk', 'ssd'], modules: false},
+    'module-bay': {kinds: null, modules: true},
+};
+//: Una interfaz cuyo tipo es una JAULA: lo que se enchufa en ella es un transceptor. La óptica
+//: de un switch no va en una bahía de módulo: va en su puerto SFP+, y ese puerto es una interfaz.
+const _DC_CAGE_RE = /sfp|qsfp|xfp|cfp|osfp|gbic/i;
+
+/** Si una bahía admite un modelo de este árbol y esta clase. Pura: la usan la búsqueda, la lista
+ *  de huecos y las pruebas. Una clase vacía o `other` no se sabe qué es, y no se filtra por ella. */
+function _dcBayTakes(bay, tree, kind) {
+    const b = bay || {};
+    const modulo = String(tree || '') === 'module-types';
+    const k = String(kind || '');
+    if (b.fam === 'interfaces')
+        return k === 'transceiver' && _DC_CAGE_RE.test(String(b.type || ''));
+    if (b.fam !== 'module-bays') return !modulo;     // una bahía de nodo, un puerto de fuera
+    const regla = _DC_BAY_TAKES[String(b.type || '')] || {kinds: null, modules: true};
+    if (modulo && !regla.modules) return false;
+    if (!regla.kinds || !k || k === 'other') return true;
+    return regla.kinds.includes(k);
+}
+
+/** Si la bahía está hecha PARA esta clase —una de fuente para una fuente, una jaula para un
+ *  transceptor—, no solo si la admite: una genérica admite todo y no está hecha para nada. */
+function _dcBayMadeFor(bay, kind) {
+    const b = bay || {};
+    const k = String(kind || '');
+    if (!k || k === 'other') return false;
+    if (b.fam === 'interfaces') return k === 'transceiver' && _DC_CAGE_RE.test(String(b.type || ''));
+    if (b.fam !== 'module-bays') return false;
+    return ((_DC_BAY_TAKES[String(b.type || '')] || {}).kinds || []).includes(k);
+}
+
+/** Si en esta bahía puede entrar algún módulo: una jaula, o una bahía de módulo que no sea solo
+ *  de componentes. */
+function _dcBayTakesModules(bay) {
+    const b = bay || {};
+    if (b.fam === 'interfaces') return _DC_CAGE_RE.test(String(b.type || ''));
+    if (b.fam !== 'module-bays') return false;
+    return (_DC_BAY_TAKES[String(b.type || '')] || {modules: true}).modules;
+}
+
+/** Todas las bahías del equipo (o de la plantilla) donde entra algo: las de módulo, las de nodo
+ *  y las jaulas de sus interfaces —sin filtrar por la clase, que es lo que aún no se sabe—. */
+function _dcCompBaysAll() {
+    const b = ((_dcBuild || {}).build) || ((_dcParts || {}).model) || null;
+    if (!b || typeof _dcBuildBays !== 'function') return [];
+    const fuera = [];
+    (_DC_BAY_FAMS || []).concat(['interfaces']).forEach(fam => {
+        let bahias = _dcBuildBays(b, fam);
+        if (!bahias.length && fam !== 'interfaces' && typeof _dcBaySeed === 'function')
+            bahias = _dcBaySeed(b, fam);
+        bahias.forEach(x => {
+            if (fam !== 'interfaces' || _DC_CAGE_RE.test(String(x.type || '')))
+                fuera.push({name: x.name, type: x.type, fam});
+        });
+    });
+    return fuera;
+}
+
+/** De lo encontrado, lo que cabe. Con una bahía ya elegida, lo que cabe en ELLA; sin ninguna, los
+ *  componentes como siempre y los módulos que caben en alguna bahía del equipo. */
+function _dcCompFit(rows) {
+    const d = _dcCompDraft || {};
+    const bahias = _dcCompBaysAll();
+    const pedida = _dcSlotsOf(d)[0] || '';
+    const ella = pedida ? bahias.find(b => _dcBaySlug(b.name) === _dcBaySlug(pedida)) : null;
+    return (rows || []).filter(r => {
+        const arbol = String(r.tree || '');
+        if (ella) return _dcBayTakes(ella, arbol, r.kind);
+        if (arbol !== 'module-types') return true;
+        return bahias.some(b => _dcBayTakesModules(b) && _dcBayTakes(b, arbol, r.kind));
+    });
+}
+
+/** La clase de la PIEZA que sale de un modelo. Un módulo dice la suya con el vocabulario del
+ *  catálogo, que no es el de las piezas: `psu`, `fan`, `nic` y `transceiver` lo son, y lo demás
+ *  —un `module` sin más, una clase de dispositivo puesta por error— es un módulo. */
+function _dcCompKindOf(fila) {
+    const kinds = ((_dcParts || {}).kinds) || ((_dcBuilds || {}).kinds) || [];
+    const k = String((fila || {}).kind || '');
+    if (k && kinds.includes(k)) return k;
+    return String((fila || {}).tree || '') === 'module-types' ? 'module' : 'other';
 }
 
 /** Tomar uno. La marca, el nombre y el tamaño salen de ÉL — el servidor los vuelve a resolver al
@@ -239,7 +348,8 @@ function _dcCompTake(uid) {
     d.model = fila.model || '';
     d.size = fila.size || '';
     d.kit_qty = Number(fila.kit_qty || 1) || 1;
-    if (fila.kind) d.kind = fila.kind;
+    d.kind = _dcCompKindOf(fila);
+    d.tree = String(fila.tree || '');
     d.searching = false;
     d.manual = false;
     renderDcim();
@@ -277,7 +387,10 @@ function _dcCompFormHtml(where) {
             d.rows.slice(0, 50).map(r => `<button class="btn btn-sm btn-secondary text-start"
                 onclick="_dcCompTake(${jsStr(r.uid)})">
                 <span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${
-                    esc(t('dcim_kind_' + r.kind) || r.kind)}</span>
+                    esc(t('dcim_kind_' + _dcCompKindOf(r)) || r.kind)}</span>${
+                String(r.tree || '') === 'module-types'
+                    ? `<span class="badge bg-info-subtle text-info-emphasis border fw-normal me-1">${
+                        esc(_dcCatTreeName(r.tree))}</span>` : ''}
                 ${esc(((r.manufacturer || '') + ' ' + (r.model || '')).trim())}
                 ${r.size ? `<span class="ss-tabular"> · ${esc(r.size)}</span>` : ''}
                 </button>`).join('')}</div>`
@@ -596,8 +709,11 @@ function _dcCompSlots() {
     if (!b || typeof _dcBuildBays !== 'function') return [];
     const d = _dcCompDraft || {};
     const fuera = String(d.mount || '') === 'external';
+    // Un transceptor va en una jaula: una bahía de módulo `sfp-cage`, o el puerto SFP+ de un
+    // switch, que es una INTERFAZ. Sin las interfaces, la óptica de un switch no tenía dónde ir.
+    const optica = String(d.kind || '') === 'transceiver' && !fuera;
     const fams = _DC_KIND_FAMS[String(d.kind || '')]
-        || (fuera ? _DC_OUTER_FAMS : (_DC_BAY_FAMS || []));
+        || (fuera ? _DC_OUTER_FAMS : (_DC_BAY_FAMS || []).concat(optica ? ['interfaces'] : []));
     // Con su familia pegada: un nombre suelto no dice de qué cara es, y «USB-A 1» delante y
     // «USB-A 1» detrás son dos puertos distintos con el mismo rótulo.
     let lista = [];
@@ -612,11 +728,26 @@ function _dcCompSlots() {
         // dos que numeren igual acaban numerando distinto, y entonces el hueco 7 de la
         // plantilla y el 7 del equipo dejan de ser el mismo.
         let bahias = _dcBuildBays(b, fam);
-        if (!bahias.length && typeof _dcBaySeed === 'function') bahias = _dcBaySeed(b, fam);
+        if (!bahias.length && fam !== 'interfaces' && typeof _dcBaySeed === 'function')
+            bahias = _dcBaySeed(b, fam);
         bahias.forEach(x => lista.push({name: x.name, type: x.type, fam: fam,
                                         gen: x.gen, signals: x.signals,
                                         volts: x.volts, watts: x.watts}));
     });
+    // Y de las de dentro, **las que admiten lo que es**: una fuente se ofrece en las bahías de
+    // fuente y no en las de disco. Lo que cuelga por fuera no se filtra —un adaptador va en el
+    // puerto que sea—, ni lo que todavía no dice qué es.
+    if (!fuera && !_DC_KIND_FAMS[String(d.kind || '')]) {
+        lista = lista.filter(x => _dcBayTakes(x, d.tree || '', d.kind));
+        // Y **las hechas para ella, primero**: una fuente va en «PSU bay 1» antes que en una
+        // bahía genérica, que admite cualquier cosa porque nadie dijo qué —en la demo, las
+        // ranuras de memoria y los zócalos—. Un MÓDULO, si el equipo tiene bahías suyas, solo
+        // en ellas: nadie mete una fuente en una ranura DIMM. Un componente conserva las
+        // genéricas, que es donde va un SSD M.2.
+        const propias = lista.filter(x => _dcBayMadeFor(x, d.kind));
+        if (String(d.tree || '') === 'module-types' && propias.length) lista = propias;
+        else lista = propias.concat(lista.filter(x => !propias.includes(x)));
+    }
     return lista;
 }
 

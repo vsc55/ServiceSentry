@@ -26,7 +26,7 @@ from lib.config.spec import CONFIG_FIELDS as _CONFIG_FIELDS, registry_defaults
 from lib.core.audit.events import audit_severity as _audit_severity
 from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
 from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
-from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS
+from lib.i18n import SUPPORTED_LANGS, ui_strings
 from lib.providers.entraid.declarations import (
     DEFAULT_APP_NAME as _ENTRA_APP_DEFAULT,
     OIDC_APP_NAME as _ENTRA_APP_OIDC,
@@ -129,7 +129,9 @@ class _ContextMixin:
             'lang': lang,
             'default_lang': self._DEFAULT_LANG,
             'dark_mode': dark_mode,
-            'i18n': TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
+            # The panel's own words. What the shipped data says is resolved on the server
+            # (`lib.i18n.DATA_SECTIONS`) and would be dead weight on every page.
+            'i18n': ui_strings(lang),
             'supported_langs': SUPPORTED_LANGS,
             'current_session_token': session.get('session_id', ''),
             'permissions_list': list(PERMISSIONS),

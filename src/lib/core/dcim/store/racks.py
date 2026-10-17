@@ -70,6 +70,12 @@ _RACK = TableSpec(
         # of racks and the aisle between them— are dragged as one; a shared opaque id, not a
         # table of groups, because a group is nothing but the things in it.
         Column('group_uid', 'TEXT', nullable=False, default="''"),
+        # Which cabinet of the catalogue (`dc_type`, tree `rack-types`) this one is, or ''.
+        # A server says what model it is and the cabinet that holds it did not: the library's
+        # «placed» could count every switch and never one cabinet, and «which of our racks are
+        # the 1200 mm ones» had no answer but measuring them. Its sizes stay its own columns —
+        # what was measured here wins over the sheet—; this says what was bought.
+        Column('type_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

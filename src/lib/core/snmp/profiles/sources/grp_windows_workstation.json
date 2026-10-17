@@ -1,13 +1,7 @@
 {
   "id": "grp_windows_workstation",
-  "label": {
-    "en_EN": "Windows workstation (everything)",
-    "es_ES": "Estacion de trabajo Windows (todo)"
-  },
-  "description": {
-    "en_EN": "The base, plus the redirector: what this machine asks of other machines, and the reconnections it had to make on its own. A Windows says which it is in its sysObjectID, so this is what a workstation is detected as.",
-    "es_ES": "La base, mas el redirector: lo que esta maquina les pide a las demas, y las reconexiones que tuvo que hacer sola. Un Windows dice cual es en su sysObjectID, asi que esto es lo que se detecta en una estacion de trabajo."
-  },
+  "label": {"i18n": "grp_windows_workstation/label"},
+  "description": {"i18n": "grp_windows_workstation/desc"},
   "includes": [
     "grp_windows",
     "windows_workstation_lm"

@@ -39,6 +39,8 @@ from lib.core.snmp import profiles as _profiles
 # walk have to get the same answer, so there is one implementation of it.
 from lib.core.snmp.sampler import _row_factor, _safe_key, read_metric
 from lib.core.snmp import manifest as _manifest
+from lib.core.snmp import simulated_agent as _simulated_agent
+from lib.modules.simulated import MARK as _SIM_MARK
 from lib.core.snmp.client import NoAnswer as _NoAnswer
 from lib.core.snmp.client import Truncated as _Truncated
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
@@ -105,6 +107,11 @@ _SILENT_GIVE_UP = 3
 # rebooted — the second used to be charted as up to 4 GiB in one interval.
 _UPTIME_OID = '1.3.6.1.2.1.1.3.0'
 _UPTIME_KEY = '_uptime'
+
+
+def _marked(mark: str) -> dict:
+    """The mark a simulated device's results carry (`lib.modules.simulated.MARK`), or none."""
+    return {_SIM_MARK: mark} if mark else {}
 
 
 def _legacy_names(name: str) -> list:
@@ -213,6 +220,13 @@ class SnmpSampler:
             self.report_progress(label, scope=label, state='fail',
                                  step=self._msg('snmp_step_resolve', lang=watching))
             return
+        # A simulated device (its registry record carries a description of its agent) is
+        # answered by that description from here on, through the same two primitives: the
+        # profiles, the rates and the rows below cannot tell, and nothing is sent.
+        sim = _simulated_agent.bind_server(self, server)
+        # …and everything it answers is marked as a simulation's, so an alert it raises (an
+        # offline demo site, a UPS on bypass) goes through the cycle and reaches no channel.
+        mark = str((sim or {}).get('source') or 'simulated') if sim else ''
 
         state = self._sample_state(srv_key)
         rows: dict = {}          # row key → {'name': …, 'values': {}, 'attrs': {}}
@@ -250,8 +264,9 @@ class SnmpSampler:
         silent = 0               # reads in a row that got no answer at all
         gave_up = False
         for _i, prof in enumerate(assigned, 1):
-            # `label_of` and not `prof['label']`: a profile names itself per language
-            # (`{'en_EN': …, 'es_ES': …}`), and printing the dict is what happens when you
+            # `label_of` and not `prof['label']`: a profile names itself per language (one
+            # text per language code, resolved from the lang files for a shipped one), and
+            # printing the dict is what happens when you
             # forget — reported from the panel as a progress line with a Python dict in it.
             # The configured NOTIFY language, because that is the one a module already uses
             # for every sentence it produces; a worker thread has no session to ask.
@@ -303,7 +318,7 @@ class SnmpSampler:
 
         self._save_sample_state(srv_key, state)
         self._save_sightings(server, sightings, partial)
-        self._emit_samples(srv_key, label, rows, answered, errors)
+        self._emit_samples(srv_key, label, rows, answered, errors, mark=mark)
         # This device is finished, and whether it ANSWERED is the thing worth seeing on a
         # checklist somebody is watching. Without it the last phase of every device spun at
         # N/N until the whole module landed — minutes, on a fleet — and a device refusing
@@ -633,7 +648,7 @@ class SnmpSampler:
     # ── What comes out ────────────────────────────────────────────────────────
 
     def _emit_samples(self, srv_key: str, label: str, rows: dict,
-                      answered: bool, errors: list) -> None:
+                      answered: bool, errors: list, mark: str = '') -> None:
         """One result for the device's own metrics, one per row of every table it serves.
 
         *errors* is ``[(metric name, error)]`` — the two kept apart because the two places
@@ -658,8 +673,8 @@ class SnmpSampler:
             # on its own. It still travels as a `down` wherever that row is not ticked.
             self._emit(f'{srv_key}/metrics', status,
                        self._msg('snmp_sample_down', label, reason),
-                       {'error': reason}, name=label, change_msg=reason,
-                       kind=_manifest.KIND_UNREACHABLE)
+                       dict({'error': reason}, **_marked(mark)), name=label,
+                       change_msg=reason, kind=_manifest.KIND_UNREACHABLE)
             return
 
         self.fail_streak(f'{srv_key}/metrics', False)
@@ -673,7 +688,7 @@ class SnmpSampler:
         if '' not in rows:
             total = sum(len(r['values']) for r in rows.values())
             self._emit(f'{srv_key}/metrics', True, self._msg('snmp_sampled', label, total),
-                       {}, name=label)
+                       _marked(mark), name=label)
         for row_key, row in rows.items():
             key = f'{srv_key}/metrics' if not row_key else f'{srv_key}/{row_key}'
             name = label if not row_key else f'{label} — {row["name"]}'
@@ -689,6 +704,7 @@ class SnmpSampler:
                 data['_watched'] = True
             if row.get('role'):
                 data['_role'] = row['role']
+            data.update(_marked(mark))
             # The verdict, and it comes from the PROFILE. A profile that has gone to the
             # trouble of saying which of a value's meanings are bad has said everything needed
             # to check the device — and until now that was thrown away: a NAS could answer

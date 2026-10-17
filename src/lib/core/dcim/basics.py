@@ -31,7 +31,8 @@ versión— no se pone ninguna y la fila dice por qué: una fecha que se inventa
 fecha que alguien va a creerse.
 
 Y sus textos **hablan los dos idiomas**: donde hace falta traducir, el fichero pone
-``{"es_ES": …, "en_EN": …}`` en vez de una cadena. Se elige idioma al sembrar y no al pintar,
+``{"i18n": "<clave>"}`` en vez de una cadena, y la palabra está en los ficheros de idioma del
+core (sección ``dcim_shipped_basics``, ver `I18N_SECTION`). Se elige idioma al sembrar y no al pintar,
 porque lo que sale de aquí se **copia** a una fila que sobrevive a la sesión que la escribió.
 """
 
@@ -41,7 +42,7 @@ import json
 import os
 import re
 
-from lib.i18n import DEFAULT_LANG
+from lib.i18n import DEFAULT_LANG, materialize as _materialize
 
 #: La etiqueta con la que entran. Propia, para que reimportar la biblioteca no se los lleve por
 #: delante ni al revés: son dos orígenes y `replace` trabaja por origen.
@@ -54,6 +55,10 @@ FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'basics.
 #: Cómo se llama el fabricante de todo lo de aquí. No es una marca: es la ausencia de una, dicha
 #: con una palabra para que la rejilla de marcas no tenga un hueco sin nombre.
 MAKER = 'Genérico'
+
+#: The section of the core lang files that words this file: ``<slug>/model``,
+#: ``<slug>/description``, ``<slug>/specs/<spec>`` and ``platform/<platform>/notes``.
+I18N_SECTION = 'dcim_shipped_basics'
 
 _CACHE: dict | None = None
 #: Cómo estaba el fichero cuando se leyó: `(mtime, tamaño)`.
@@ -86,7 +91,9 @@ def _doc() -> dict:
     if _CACHE is None or firma != _SEEN:
         try:
             with open(FILE, encoding='utf-8') as fh:
-                _CACHE = json.load(fh)
+                # Resolved once, on reading: the rest of this module picks a language out of a
+                # text per language, as it did when the file carried them inline.
+                _CACHE = _materialize(json.load(fh), I18N_SECTION)
         except Exception:                       # pylint: disable=broad-except
             _CACHE = {}
         if not isinstance(_CACHE, dict):
@@ -98,8 +105,8 @@ def _doc() -> dict:
 def _text(v, lang: str = '') -> str:
     """Un texto del fichero, en el idioma que se pida.
 
-    Puede venir como cadena —lo que no hace falta traducir, un nombre propio— o como
-    ``{'es_ES': …, 'en_EN': …}``. Lo de aquí se **copia** a una fila de la base de datos y
+    Puede venir como cadena —lo que no hace falta traducir, un nombre propio— o como un
+    texto por idioma, que es en lo que `_doc` convierte cada referencia del fichero. Lo de aquí se **copia** a una fila de la base de datos y
     sobrevive a la sesión que la escribió, así que no se puede traducir al pintarlo: hay que
     elegir un idioma al sembrar, y el que corresponde es el de quien pulsó el botón.
 

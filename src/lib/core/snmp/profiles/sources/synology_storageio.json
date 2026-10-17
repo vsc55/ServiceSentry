@@ -1,13 +1,7 @@
 {
     "id": "synology_storageio",
-    "label": {
-        "en_EN": "Synology — disk I/O (SYNOLOGY-STORAGEIO-MIB)",
-        "es_ES": "Synology — E/S de disco (SYNOLOGY-STORAGEIO-MIB)"
-    },
-    "description": {
-        "en_EN": "Per physical disk: bytes and operations per second from the 64-bit counters, plus the utilisation the DiskStation itself computes. Replaces the generic UCD disk-I/O profile on a Synology — it runs net-snmp underneath, so both would answer and every disk would be charted twice.",
-        "es_ES": "Por disco físico: bytes y operaciones por segundo desde los contadores de 64 bits, más la utilización que calcula el propio DiskStation. Sustituye al perfil genérico de E/S de UCD en un Synology — por debajo corre net-snmp, así que contestarían los dos y cada disco se graficaría dos veces."
-    },
+    "label": {"i18n": "synology_storageio/label"},
+    "description": {"i18n": "synology_storageio/desc"},
     "match": {
         "sysobjectid_prefix": "1.3.6.1.4.1.6574",
         "probe": "1.3.6.1.4.1.6574.101.1.1.1.0",
@@ -16,7 +10,7 @@
     "metrics": [
         {
             "key": "syno_io_read",
-            "label": {"en_EN": "Read", "es_ES": "Lectura"},
+            "label": {"i18n": "synology_storageio/syno_io_read"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.12",
             "kind": "counter",
             "unit": "B/s",
@@ -26,7 +20,7 @@
         },
         {
             "key": "syno_io_write",
-            "label": {"en_EN": "Written", "es_ES": "Escritura"},
+            "label": {"i18n": "synology_storageio/syno_io_write"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.13",
             "kind": "counter",
             "unit": "B/s",
@@ -36,7 +30,7 @@
         },
         {
             "key": "syno_io_reads",
-            "label": {"en_EN": "Read operations", "es_ES": "Operaciones de lectura"},
+            "label": {"i18n": "synology_storageio/syno_io_reads"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.15",
             "kind": "counter",
             "unit": "op/s",
@@ -45,7 +39,7 @@
         },
         {
             "key": "syno_io_writes",
-            "label": {"en_EN": "Write operations", "es_ES": "Operaciones de escritura"},
+            "label": {"i18n": "synology_storageio/syno_io_writes"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.16",
             "kind": "counter",
             "unit": "op/s",
@@ -54,7 +48,7 @@
         },
         {
             "key": "syno_io_util",
-            "label": {"en_EN": "Utilisation", "es_ES": "Utilización"},
+            "label": {"i18n": "synology_storageio/syno_io_util"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.8",
             "kind": "gauge",
             "unit": "%",
@@ -63,7 +57,7 @@
         },
         {
             "key": "syno_io_read_lat",
-            "label": {"en_EN": "Read latency", "es_ES": "Latencia de lectura"},
+            "label": {"i18n": "synology_storageio/syno_io_read_lat"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.19",
             "kind": "gauge",
             "unit": "ms",
@@ -73,7 +67,7 @@
         },
         {
             "key": "syno_io_write_lat",
-            "label": {"en_EN": "Write latency", "es_ES": "Latencia de escritura"},
+            "label": {"i18n": "synology_storageio/syno_io_write_lat"},
             "walk": "1.3.6.1.4.1.6574.101.1.1.20",
             "kind": "gauge",
             "unit": "ms",

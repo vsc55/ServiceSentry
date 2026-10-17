@@ -24,7 +24,7 @@ async function _dcHistLoad() {
     renderDcim();
     const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/history`);
     if (((_dcimRack || {}).rack || {}).uid !== rack.uid) return;      // ya es otro rack
-    _dcHist = {rows: (d || {}).history || []};
+    _dcHist = {rows: (d || {}).history || [], models: (d || {}).models || {}};
     renderDcim();
 }
 
@@ -95,7 +95,8 @@ function _dcHistOne(c) {
             >− ${quien} · ${esc(_dcHistWhere(c.from))}</span>`;
     const campo = esc(_dcHistField(c.field));
     // Where something is placed is a choice of three, said with its words and not its code.
-    const val = (v) => c.field === 'placement' ? t('dcim_place_col_' + (v || 'u'))
+    const val = (v) => c.field === 'type_uid' ? _dcHistVal(_dcHistModelName(v))
+        : c.field === 'placement' ? t('dcim_place_col_' + (v || 'u'))
         : c.field === 'side_pos' ? t('dcim_side_pos_' + (v || ''))
         : c.field === 'side_slot' ? t('dcim_side_slot_' + (Number(v) || 0)) : _dcHistVal(v);
     const de = esc(val(c.from)), a = esc(val(c.to));
@@ -113,6 +114,13 @@ function _dcHistWhere(v) {
     if (s === 'mounted') return t('dcim_item_on');
     if (s.startsWith('place:')) return t('dcim_place_col_' + s.slice(6));
     return s;
+}
+
+/** El nombre de un modelo del armario en el historial: el que manda el servidor con la lista
+ *  (`models`); sin él, el identificador, que es mejor que un hueco. */
+function _dcHistModelName(uid) {
+    const u = String(uid || '');
+    return u ? String(((_dcHist || {}).models || {})[u] || u) : '';
 }
 
 function _dcHistVal(v) {
@@ -139,7 +147,7 @@ const _DC_HIST_FIELD = {
     u_slot_span: 'dcim_item_slot_span', u_split: 'dcim_item_split',
     side_pos: 'dcim_side_pos', side_slot: 'dcim_side_slot',
     name: 'dcim_rack_name', desc_units: 'dcim_numbering', width_mm: 'dcim_width_mm',
-    depth_mm: 'dcim_depth_mm', room_uid: 'dcim_room',
+    depth_mm: 'dcim_depth_mm', room_uid: 'dcim_room', type_uid: 'dcim_cat_model',
 };
 
 /** Dos versiones cualesquiera, comparadas.
@@ -177,9 +185,11 @@ function _dcRevCompare(antes, ahora) {
     const idx = f => Object.fromEntries(((f || {}).items || []).map(i => [String(i.uid), i]));
     const a = idx(antes), b = idx(ahora);
     const fuera = [];
-    ['name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid'].forEach(k => {
-        if ((antes || {})[k] !== (ahora || {})[k])
-            fuera.push({kind: 'rack', field: k, from: (antes || {})[k], to: (ahora || {})[k]});
+    ['name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid', 'type_uid'].forEach(k => {
+        let de = (antes || {})[k], a = (ahora || {})[k];
+        // El modelo se empezó a guardar más tarde: sin la clave es «ninguno» (como el servidor).
+        if (k === 'type_uid') { de = de || ''; a = a || ''; }
+        if (de !== a) fuera.push({kind: 'rack', field: k, from: de, to: a});
     });
     Object.keys(b).forEach(uid => {
         if (!a[uid]) fuera.push({kind: 'add', label: b[uid].label, to: _dcRevWhere(b[uid])});

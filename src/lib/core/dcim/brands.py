@@ -201,16 +201,9 @@ def usage(store, cat, said, allowed) -> dict:
     One read of the items that name a model, one of the brands of those models, and the site
     tree — not a query per brand.
     """
-    from lib.core.dcim import owners as dcim_owners                     # noqa: PLC0415
     if store is None or cat is None:
         return {}
-    rack_room, room_site = {}, {}
-    for sitio in store.sites.list():
-        for sala in store.rooms_of(sitio['uid']):
-            room_site[str(sala['uid'])] = str(sitio['uid'])
-            for r in store.racks_of(sala['uid']):
-                rack_room[str(r['uid'])] = str(sala['uid'])
-    items = store.items.list("type_uid <> ''")
+    items, rack_room, room_site = visible_items(store, said, allowed, "type_uid <> ''")
     de_marca = cat.brands_of(it.get('type_uid') for it in items)
     out: dict = {}
     for it in items:
@@ -219,15 +212,6 @@ def usage(store, cat, said, allowed) -> dict:
             continue
         rack = str(it.get('rack_uid') or '')
         sala = rack_room.get(rack, '') if rack else str(it.get('room_uid') or '')
-        cadena = [('item', str(it['uid']))]
-        if rack:
-            cadena.append(('rack', rack))
-        if sala:
-            cadena.append(('room', sala))
-        if room_site.get(sala):
-            cadena.append(('site', room_site[sala]))
-        if not dcim_owners.may_see(dcim_owners.owner_of(cadena, said), allowed):
-            continue
         u = out.setdefault(marca, {'items': 0, 'models': set(), 'racks': set(),
                                    'sites': set()})
         u['items'] += 1
@@ -238,3 +222,87 @@ def usage(store, cat, said, allowed) -> dict:
             u['sites'].add(room_site[sala])
     return {m: {'items': u['items'], 'models': len(u['models']), 'racks': len(u['racks']),
                 'sites': len(u['sites'])} for m, u in out.items()}
+
+
+def visible_items(store, said, allowed, where: str = '', params: tuple = ()) -> tuple:
+    """``(items, rack_room, room_site)`` — the items matching *where* this caller may see.
+
+    The inventory's company rule (`owners.owner_of` over the item's chain, innermost wins),
+    with the chain built from three maps read once instead of `chain_of` per item — a screen
+    that counts every placed model would otherwise pay three reads per item. The two maps come
+    back too, for a caller that needs the rack's room or the room's site of what it counts.
+    """
+    from lib.core.dcim import owners as dcim_owners                     # noqa: PLC0415
+    rack_room, room_site = {}, {}
+    for sitio in store.sites.list():
+        for sala in store.rooms_of(sitio['uid']):
+            room_site[str(sala['uid'])] = str(sitio['uid'])
+            for r in store.racks_of(sala['uid']):
+                rack_room[str(r['uid'])] = str(sala['uid'])
+    out = []
+    for it in store.items.list(where, params):
+        rack = str(it.get('rack_uid') or '')
+        sala = rack_room.get(rack, '') if rack else str(it.get('room_uid') or '')
+        cadena = [('item', str(it['uid']))]
+        if rack:
+            cadena.append(('rack', rack))
+        if sala:
+            cadena.append(('room', sala))
+        if room_site.get(sala):
+            cadena.append(('site', room_site[sala]))
+        if dcim_owners.may_see(dcim_owners.owner_of(cadena, said), allowed):
+            out.append(it)
+    return out, rack_room, room_site
+
+
+def placed_counts(store, said, allowed) -> dict:
+    """``{type_uid: n}`` — how many of each catalogue model are PLACED, over what the caller
+    may see.
+
+    Placed is a device in a rack or a room (`dc_item`), a component fitted in one (`dc_part`,
+    by its quantity), a cabinet that names its model (`dc_rack`) and a piece of a room's plan
+    that names a model (`dc_feature`, a lock or a reader). The same company boundary as
+    :func:`usage`: a model that says «12 placed» of which none are yours is somebody else's
+    fleet counted through the catalogue. A part follows the item it is fitted in; a cabinet and
+    a plan piece follow their room.
+    """
+    from lib.core.dcim import owners as dcim_owners                     # noqa: PLC0415
+    if store is None:
+        return {}
+    items, _rack_room, room_site = visible_items(store, said, allowed)
+    out: dict = {}
+    vistos = set()
+    for it in items:
+        vistos.add(str(it['uid']))
+        tipo = str(it.get('type_uid') or '')
+        if tipo:
+            out[tipo] = out.get(tipo, 0) + 1
+    for p in store.parts.list("type_uid <> ''"):
+        if str(p.get('item_uid') or '') not in vistos:
+            continue
+        tipo = str(p.get('type_uid') or '')
+        try:
+            n = max(1, int(p.get('qty') or 1))
+        except (TypeError, ValueError):
+            n = 1
+        out[tipo] = out.get(tipo, 0) + n
+    # And a cabinet that says which of the catalogue's it is: it is placed too, by its room.
+    for r in store.racks.list("type_uid <> ''"):
+        sala = str(r.get('room_uid') or '')
+        cadena = [('rack', str(r['uid'])), ('room', sala)]
+        if room_site.get(sala):
+            cadena.append(('site', room_site[sala]))
+        if not dcim_owners.may_see(dcim_owners.owner_of(cadena, said), allowed):
+            continue
+        tipo = str(r.get('type_uid') or '')
+        out[tipo] = out.get(tipo, 0) + 1
+    for f in store.features.list("type_uid <> ''"):
+        sala = str(f.get('room_uid') or '')
+        cadena = [('feature', str(f['uid'])), ('room', sala)]
+        if room_site.get(sala):
+            cadena.append(('site', room_site[sala]))
+        if not dcim_owners.may_see(dcim_owners.owner_of(cadena, said), allowed):
+            continue
+        tipo = str(f.get('type_uid') or '')
+        out[tipo] = out.get(tipo, 0) + 1
+    return out

@@ -468,6 +468,8 @@ def register(app, wa, C):
             # Y lo lleno que está: el 3D de la sala colorea por ocupación con esto, y sin ello
             # cada rack salía en el gris de «no se sabe».
             rack['used_u'] = dcim_svc.used_u(store, rack)
+        # Y de qué modelo es, por su nombre: el formulario de editarlo sale de esta lista.
+        C.rack_models(racks)
         return jsonify({'racks': racks})
 
     @app.route('/api/v1/dcim/racks/<uid>', methods=['GET'])
@@ -555,7 +557,8 @@ def register(app, wa, C):
         # Contando lo que este lector VE, como todo lo demás: los cables de sus equipos y las
         # regletas de este armario.
         mios = [it['uid'] for it in items if not it.get('foreign')]
-        return jsonify({'rack': dict(rack, org_uid=C.owner_of(store, said, 'rack', uid)),
+        return jsonify({'rack': C.rack_models([dict(rack, org_uid=C.owner_of(store, said,
+                                                                            'rack', uid))])[0],
                         'counts': {
                             'cables': len(store.cables_of(mios) or ()),
                             'power': len(store.feeds_of(
@@ -876,7 +879,18 @@ def register(app, wa, C):
                           'changed': [] if ultima
                                      else dcim_rackrev.compare(previa, f.get('data') or {}),
                           'data': f.get('data') or {}})
-        return jsonify({'history': fuera})
+        # Y cómo se llama cada modelo de armario que aparece en alguna versión: la foto guarda
+        # el identificador —lo que sigue siendo cierto si alguien corrige el nombre— y el
+        # renglón tiene que decir «Demo DM-RK42-612», no treinta y seis caracteres.
+        cat = getattr(wa, '_dcim_catalog', None)
+        modelos = {}
+        for f in fuera:
+            tipo = str((f.get('data') or {}).get('type_uid') or '')
+            if tipo and tipo not in modelos:
+                fila = (cat.get(tipo) if cat is not None else None) or {}
+                modelos[tipo] = ' '.join(x for x in (str(fila.get('manufacturer') or ''),
+                                                     str(fila.get('model') or '')) if x)
+        return jsonify({'history': fuera, 'models': {k: v for k, v in modelos.items() if v}})
 
     #: Cuántos equipos devuelve una búsqueda cuando nadie dice cuántos. Treinta es una lista
     #: que se lee; doscientas es un desplegable disfrazado, y quien busca «PP» en una sala

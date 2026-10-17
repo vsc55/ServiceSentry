@@ -25,3 +25,8 @@ it sits, and either side survives the other being deleted.
 
 See ``docs/explica-dcim.md`` for the model, the phases, and what is deliberately not built.
 """
+
+# The parts of the demo that live outside it join it here, at import (`demo.register_part`):
+# the monitoring side —devices, clusters, checks and their simulated results—. Imported by
+# whatever imports the inventory, so the panel and the command line both see it.
+from lib.core.dcim import demo_monitor as _demo_monitor     # noqa: E402,F401  pylint: disable=wrong-import-position

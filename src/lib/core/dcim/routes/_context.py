@@ -313,6 +313,26 @@ def build(app, wa):
                 fuera['u_height'] = max(1, -(-decimas // 10))
         return fuera
 
+    def _rack_models(racks) -> list:
+        """Each rack with the NAME of its cabinet model (`type_name`), when it says one.
+
+        The rack stores the model's uid, which is what stays true when somebody corrects the
+        model's name; the form, the header and the plan show the name — thirty-six characters of
+        identifier say nothing. One read per distinct model, not per rack: a room of forty racks
+        is usually two or three models."""
+        cat = getattr(wa, '_dcim_catalog', None)
+        nombres: dict = {}
+        for rack in racks or ():
+            tipo = str(rack.get('type_uid') or '')
+            if not tipo:
+                continue
+            if tipo not in nombres:
+                fila = (cat.get(tipo) if cat is not None else None) or {}
+                nombres[tipo] = ' '.join(x for x in (str(fila.get('manufacturer') or ''),
+                                                     str(fila.get('model') or '')) if x)
+            rack['type_name'] = nombres[tipo]
+        return racks
+
     def _asset(part, data, skip: str = '') -> str:
         """Deja el número de inventario RESUELTO en *data*, y devuelve el error o ``''``.
 
@@ -363,6 +383,7 @@ def build(app, wa):
         from_build=_from_build,
         files=_files,
         asset=_asset,
+        rack_models=_rack_models,
         view_req=dcim_view_req,
         edit_req=dcim_edit_req,
         cable_req=dcim_cable_req,

@@ -62,6 +62,18 @@ def _ensure_sender() -> None:
             _SENDER[:] = [t]
 
 
+def deliverable(alerts: list) -> list:
+    """The alerts that may leave the panel: all but the simulated ones.
+
+    A simulated result (a demonstration's scenario, `lib.modules.simulated`) goes through the
+    whole pipeline —state, history, the change that raises an alert— and stops HERE, the one
+    place a monitor alert meets the channels. Whatever Telegram, Teams, e-mail or webhooks the
+    installation has configured, a demo outage in a site that does not exist must never page a
+    person. There is no setting that lets them through: that would be a decision about other
+    people's phones, and it is not one this code takes."""
+    return [a for a in alerts or () if not (isinstance(a, dict) and a.get('simulated'))]
+
+
 class MonitorNotifier:
     """Accumulates a monitoring cycle's alerts and flushes them grouped per channel.
 
@@ -87,7 +99,7 @@ class MonitorNotifier:
         self._route_kind = route_kind
 
     def add(self, kind: str, module: str, item: str, message: str,
-            also: str = '') -> None:
+            also: str = '', simulated: bool = False) -> None:
         """Buffer one alert. ``kind`` ∈ {down, recovery, warn}.
 
         ``also`` is a SECOND kind this alert may be routed by — a module saying "this failure
@@ -99,12 +111,17 @@ class MonitorNotifier:
         ticks it and reads false until then. Routing by the new kind alone would have silently
         stopped every alert that arrives today as a `down` — the alert would not have failed,
         it would simply have stopped, which is the worst shape a notification bug takes.
+
+        ``simulated`` marks the alert of a result no probe produced (a demonstration's,
+        `lib.modules.simulated`). It is buffered like any other — the cycle saw the change —
+        and dropped in :meth:`_send`, before any channel: see :func:`deliverable`.
         """
         if kind and message:
             with self._alerts_lock:
                 self._alerts.append({'kind': kind, 'module': module or '',
                                      'item': item or '', 'message': message,
-                                     'also': str(also or '')})
+                                     'also': str(also or ''),
+                                     'simulated': bool(simulated)})
 
     def has_pending(self) -> bool:
         return bool(self._alerts)
@@ -140,6 +157,17 @@ class MonitorNotifier:
 
     def _send(self, alerts: list, public_url: str) -> dict:
         wa = self._wa
+        retenidas = len(alerts)
+        alerts = deliverable(alerts)
+        retenidas -= len(alerts)
+        if retenidas:
+            try:
+                wa._dbg(f"> Notify >> {retenidas} simulated alert(s) kept from every channel",
+                        DebugLevel.info)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        if not alerts:
+            return {}
         try:
             cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         except Exception as exc:  # pylint: disable=broad-except

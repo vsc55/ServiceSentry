@@ -779,6 +779,8 @@ function _dcPlanRackOut(r) {
         base_mm: Number(r.base_mm) || 0,
         width_mm: Number(r.width_mm) || 600, depth_mm: Number(r.depth_mm) || 1000,
         group_uid: r.group_uid || '',
+        // Y de qué modelo del catálogo es: un rack nuevo creado al importarlo lo conserva.
+        type_uid: r.type_uid || '',
     };
 }
 

@@ -679,13 +679,15 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
 // ──────────────────────────── Pagination ──────────────────────────
 // Build the two halves separately so callers can lay them out independently
 // (e.g. the info text on one side and the controls on the other).
-function _paginationParts(total, page, pageSize, goFn, changeFn) {
+// `choices` (optional) narrows the page-size selector — a server-paged table drops the sizes its
+// server would not honour; without it, the configured `_tableRowChoices`.
+function _paginationParts(total, page, pageSize, goFn, changeFn, choices) {
     const ps = pageSize || total;
     const totalPages = Math.max(1, Math.ceil(total / ps));
     const p = Math.min(Math.max(1, page), totalPages);
     const start = (p - 1) * ps + 1;
     const end = Math.min(p * ps, total);
-    const sizeOpts = _tableRowChoices.map(s => {
+    const sizeOpts = (choices || _tableRowChoices).map(s => {
         const label = s === 0 ? t('all') : s;
         return `<option value="${s}"${pageSize === s ? ' selected' : ''}>${label}</option>`;
     }).join('');
@@ -720,8 +722,8 @@ function _paginationParts(total, page, pageSize, goFn, changeFn) {
         </div>`;
     return { info, controls };
 }
-function _renderPagination(total, page, pageSize, goFn, changeFn) {
-    const { info, controls } = _paginationParts(total, page, pageSize, goFn, changeFn);
+function _renderPagination(total, page, pageSize, goFn, changeFn, choices) {
+    const { info, controls } = _paginationParts(total, page, pageSize, goFn, changeFn, choices);
     return `<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">${info}${controls}</div>`;
 }
 

@@ -93,6 +93,19 @@
     </div>
 </div>
 
+{# The side drawer — the summary of ONE thing beside the list it was picked from (a brand, a
+   model of the library), opened by `showDrawer` (partials/core/_drawer.html). A drawer and not a
+   dialog because the list stays in view: the next row is one click away, and the drawer follows
+   it. Its actions go in the header beside the close, where a drawer's are looked for. #}
+<div class="offcanvas offcanvas-end ss-drawer" tabindex="-1" id="ssDrawer" aria-labelledby="ssDrawerTitle">
+    <div class="offcanvas-header py-2 gap-2 border-bottom">
+        <h6 class="offcanvas-title text-truncate mb-0" id="ssDrawerTitle"></h6>
+        <span id="ssDrawerActions" class="ms-auto d-flex gap-1"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+    </div>
+    <div class="offcanvas-body" id="ssDrawerBody"></div>
+</div>
+
 {# Unsaved changes modal — 3 buttons: Cancel / Discard / Save #}
 <div class="modal fade" id="unsavedChangesModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">

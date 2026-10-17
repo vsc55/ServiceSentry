@@ -340,6 +340,14 @@ html.ss-nocss body { visibility: visible; }
 .ss-card-band        { padding: .5rem .75rem; background: var(--ss-pagination-bg); }
 .ss-card-band-top    { border-bottom: 1px solid var(--bs-border-color); }
 .ss-card-band-bottom { border-top:    1px solid var(--bs-border-color); }
+/* .ss-card-tools : what a list keeps INSIDE its card between the header and the top pagination
+   band — segmented filters, a filter row, the chips of what is set, the band over what is ticked
+   (createListTable's `toolbar`). On the card's own surface, not the band's, so the pagination
+   strip still reads as the edge of the rows. Generic: any list with controls of its own. */
+.ss-card-tools { display: flex; flex-direction: column; gap: .5rem; padding: .6rem .75rem;
+                 border-bottom: 1px solid var(--bs-border-color); }
+.ss-card-tools > .ss-selband { margin-bottom: 0; }
+.ss-card-tools > :empty { display: none; }
 
 /* ── Collapsible card header (device modal, etc.) ───────────────────────────── */
 .ss-collapse-head { cursor: pointer; user-select: none; }
@@ -1257,6 +1265,10 @@ html.ss-nocss body { visibility: visible; }
     grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
     gap: 0 1.5rem;
 }
+/* .ss-log-box : a running log inside a dialog — a FIXED height that scrolls, so the dialog keeps
+   its size while lines arrive instead of growing under the reader's pointer. */
+.ss-log-box { height: 16rem; overflow-y: auto; }
+
 /* .ss-modal-fit : a dialog whose size follows its CONTENT, and is therefore not the reader's
    to set — no full height, no resize handle, no maximise button (see init/_behaviors.html).
 
@@ -1745,6 +1757,21 @@ html.ss-nocss body { visibility: visible; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .ss-infra-linkinfo { background: rgba(var(--bs-body-bg-rgb), .9); }
 }
+/* The network maps' search (_netgraph.html): while something is being looked for, what matches
+   and what is joined to it stay, and everything else steps back — on the svg, by class, so it
+   costs a class toggle per element and never a redraw under the pointer. */
+.ss-net-finding [data-id], .ss-net-finding [data-a] { opacity: .14; transition: opacity .12s; }
+.ss-net-finding .ss-net-hit, .ss-net-finding .ss-net-near { opacity: 1; }
+.ss-net-finding .ss-net-hit > rect:first-of-type { stroke-width: 3.5; }
+.ss-net-find { width: 12rem; display: inline-block; }
+/* A glyph of the icon font drawn as SVG text: not something to select or to aim the pointer at. */
+.ss-net-glyph { pointer-events: none; user-select: none; }
+.ss-net-pill { pointer-events: none; }
+/* …and far away (ssNetLod), a machine's words are not drawn: unreadable at that size, and most of
+   the cost of a frame. Its box, its colour and its lines stay; folded sites keep their names. */
+.ss-net-far [data-id]:not([data-id^="grp:"]) text,
+.ss-net-far [data-id]:not([data-id^="grp:"]) .ss-net-glyph,
+.ss-net-far .ss-net-pill { display: none; }
 /* .ss-tabular : digits that line up in a column. A U number, a port count, a byte figure —
    anything read down a column rather than across a sentence. Proportional digits make 11 and 44
    different widths, and a column of those cannot be scanned. */
@@ -2647,6 +2674,12 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .ss-account-body { max-width: 76rem; }
 .ss-account-body:has(> .tab-content > .tab-pane.active.ss-wide) { max-width: none; }
 .ss-sb-flyout .ss-sb-subsub { padding-left: 1rem; }
+/* How much is behind a view, beside its name (`_sbSetViewCounts`). Pushed to the row's end and
+   quieter than the label: it is there to decide whether to go in, not to compete with the name.
+   Empty until a section fills it, and then it takes no room at all. */
+.ss-sb-vcount { margin-left: auto; padding-left: .75rem; font-size: .72rem; opacity: .6;
+    font-variant-numeric: tabular-nums; }
+.ss-sb-vcount:empty { display: none; }
 /* The flyout always shows full items (icon + label) left-aligned, even in mini mode —
    otherwise the mini rule (centred icon, no gap) leaves a big gap before the icon. */
 .ss-layout.ss-mini .ss-sb-flyout .ss-sb-label { opacity: 1; }
@@ -3027,6 +3060,8 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 }
 .cfg-actcard-title { font-weight: 600; font-size: .9rem; }
 .cfg-actcard-desc { font-size: .8rem; color: var(--bs-secondary-color); margin-top: .2rem; }
+.cfg-actcard-status { font-size: .8rem; margin-top: .35rem; }
+.cfg-actcard-status:empty { display: none; }
 
 /* ── Database optimize: one row per table, with its own state ────────
    The tick is the whole point of the dialog, so the icon column is fixed-width: rows whose
@@ -4043,3 +4078,58 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     .ss-pulse, .ss-ping, .ss-glow-danger, .ss-glow-warning { animation: none; }
     .ss-ping { opacity: 0; }
 }
+
+/* ── A band about what is ticked in a list, and the question it asks ─────────────────────
+   `.ss-selband`: «N ticked · Export · Untick … Remove…», right above the rows it is about.
+   `-danger` when it asks whether to remove them, `-warn` for a heavier confirmation (bring the
+   basics, bring the whole library). Asked IN the band rather than in a dialog on top: the
+   question is about the rows that are right there. Generic: any list with a selection. */
+.ss-selband { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem;
+    padding: .35rem .6rem; margin-bottom: .5rem; border-radius: .375rem;
+    background: var(--bs-primary-bg-subtle); color: var(--bs-emphasis-color); }
+.ss-selband-danger { background: var(--bs-danger-bg-subtle); }
+.ss-selband-warn { background: var(--bs-warning-bg-subtle); }
+
+/* ── The side drawer (partials/core/_drawer.html) and what a drawer shows ──────────────── */
+.ss-drawer { --bs-offcanvas-width: min(26rem, 100vw); }
+/* A key/value list: the label in a narrow column, the value wrapping beside it. */
+.ss-kv { display: grid; grid-template-columns: minmax(6rem, 34%) 1fr; gap: .3rem .75rem;
+    margin: 0; }
+.ss-kv > dt { font-weight: 400; color: var(--bs-secondary-color); }
+.ss-kv > dd { margin: 0; overflow-wrap: anywhere; }
+/* A section title inside a drawer or a summary tile: small capitals, quieter than the content. */
+.ss-drawer-h, .ss-tile-lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--bs-secondary-color); margin-bottom: .3rem; }
+.ss-drawer-img { max-height: 8rem; object-fit: contain; }
+.ss-drawer-noimg { display: flex; align-items: center; justify-content: center; height: 4rem;
+    border: 1px dashed var(--bs-border-color); border-radius: .375rem;
+    color: var(--bs-secondary-color); font-size: .8rem; }
+
+/* ── A summary tile: a label, a big figure, and what the figure is made of ─────────────── */
+.ss-tile-big { font-size: 1.6rem; font-weight: 700; line-height: 1.15; }
+/* A stacked bar: one segment per part, its width the part's share (set inline, as data). */
+.ss-stackbar { display: flex; height: .4rem; border-radius: .2rem; overflow: hidden;
+    background: var(--bs-secondary-bg); }
+.ss-stackbar > span { display: block; height: 100%; }
+/* .ss-surface : a Bootstrap .card painted as the panel's cards are (the list tables, the
+   widgets): the surface colour, a step lighter than the page in the dark theme, so a card
+   reads as an object on it instead of a frame drawn on the page. */
+.ss-surface { --bs-card-bg: var(--ss-surface-bg, var(--bs-body-bg));
+    background-color: var(--ss-surface-bg, var(--bs-body-bg)); }
+/* .ss-list-dashed : a flush list-group inside a card, whose rows are lines of the card and not
+   boxes of their own — no fill of their own, a dashed rule between them, the body size. */
+.ss-list-dashed > .list-group-item { background-color: transparent; font-size: .8125rem;
+    border-bottom: 1px dashed var(--bs-border-color); }
+.ss-list-dashed > .list-group-item:last-child { border-bottom: 0; }
+.ss-list-dashed .badge { font-size: .75rem; }
+.ss-list-dashed > .list-group-item-action:hover,
+.ss-list-dashed > .list-group-item-action:focus-visible {
+    background-color: var(--bs-tertiary-bg); }
+/* A series palette for parts of a whole (stacked bars, their legends): four hues that read the
+   same on a light and a dark background, distinct from the state colours. */
+.ss-series-1 { background-color: #3b82f6 !important; }
+.ss-series-2 { background-color: #8b5cf6 !important; }
+.ss-series-3 { background-color: #f59e0b !important; }
+.ss-series-4 { background-color: #10b981 !important; }
+.ss-legend-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: .15rem;
+    margin-right: .25rem; vertical-align: baseline; }

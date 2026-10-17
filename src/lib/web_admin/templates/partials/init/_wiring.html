@@ -163,9 +163,9 @@ document.getElementById('btn-tab-clusters')?.addEventListener('shown.bs.tab', as
     await loadDevices();
     renderClusters();
 });
-// The models and the templates draw through the inventory's renderer, which paints whichever
-// of its panes is on screen.
-document.getElementById('btn-tab-models')?.addEventListener('shown.bs.tab', () => renderDcim());
+// The templates draw through the inventory's renderer, which paints whichever of its panes is
+// on screen. The library (`btn-tab-models`) is a declared page and is wired by the registry
+// loop above, like every other section with views.
 document.getElementById('btn-tab-builds')?.addEventListener('shown.bs.tab', () => renderDcim());
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);

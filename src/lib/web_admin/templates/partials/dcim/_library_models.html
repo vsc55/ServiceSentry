@@ -1,0 +1,615 @@
+{# ================================================================
+   DCIM — la biblioteca: la vista de los Modelos.
+
+   Es una lista del panel y se ve como las demás (Usuarios, Marcas): **una tarjeta de borde a
+   borde dibujada por `createListTable`**, sin renglón de título encima. En la cabecera, el
+   título con su cuenta y, a quien gestiona, «Nuevo modelo» e «Importar…»; luego el selector de
+   columnas, «Actualizar» y un menú con lo que se hace dos veces al año (traer un JSON, vaciar un
+   origen). Debajo de la cabecera, DENTRO de la tarjeta, la barra se lee en el orden en que se
+   piensa: qué FORMA (con cuántos hay de cada una con lo demás puesto) y cómo mirarlo —la tabla o
+   la rejilla por marca—; luego los filtros: el buscador, la marca (también «sin ficha»), la clase
+   y el origen. Lo puesto se ve en fichas que se quitan una a una o todas a la vez.
+
+   **Paginada y ordenada en el servidor** (`serverPaging` de la tabla compartida): el catálogo
+   son miles de filas. Pulsar una cabecera ordena por esa columna —otra vez, al revés— y lo que
+   se pide al servidor lleva `sort`/`dir` y el tamaño de página (`limit`). Lo colocado no se
+   ordena: se cuenta en memoria sobre el inventario, no es una columna de la tabla.
+
+   **El buscador dice lo mismo en las dos vistas**: busca modelos. En la rejilla cada marca dice
+   cuántos de los suyos coinciden.
+
+   Las filas no llevan botones: pulsar una abre su ficha a un lado (`_library_drawer.html`), con
+   Editar, Clonar, Quitar y la ficha completa. Lo marcado tiene su franja —exportar, desmarcar,
+   quitar— y quitar pregunta EN la franja, no en un diálogo.
+   ================================================================ #}
+
+//: Si quitar lo marcado está esperando la confirmación de la franja.
+let _dcCatAsk = false;
+//: Cuándo buscar al teclear: al dejar de hacerlo. Una petición por letra sería gastar la red en
+//: búsquedas que nadie va a mirar.
+let _dcCatQTimer = 0;
+//: The column the list is sorted by (`''` is the default, by brand) and which way. Sorted on the
+//: server: the list is paged there, and sorting one page would be sorting a sample.
+let _dcCatSort = '';
+let _dcCatDir = 'asc';
+
+//: Las columnas. `always`, las que no se quitan (sin el nombre no hay fila; la miniatura no es
+//: una columna que se elija); `usage`, las que piden ver el inventario. `sortKey` solo donde el
+//: servidor sabe ordenar (`CatalogStore.SORTS`).
+const _DCCAT_COLS = [
+    {id: 'img', label: () => '', always: true, resizable: false},
+    {id: 'maker', label: () => t('dcim_cat_maker'), sortKey: 'maker'},
+    {id: 'model', label: () => t('dcim_cat_model'), sortKey: 'model', always: true},
+    {id: 'u', label: () => (_dcCatTree === 'component-types' ? t('dcim_part_size') : 'U'),
+     sortKey: 'u', thClass: 'text-end'},
+    {id: 'kind', label: () => t('dcim_role'), sortKey: 'kind'},
+    {id: 'ports', label: () => t('dcim_cat_ports')},
+    {id: 'source', label: () => t('dcim_lib_col_source'), sortKey: 'source'},
+    {id: 'placed', label: () => t('dcim_lib_col_placed'), usage: true, thClass: 'text-end'},
+    {id: 'imported', label: () => t('dcim_cat_imported'), sortKey: 'imported'},
+];
+const _DCCAT_COLS_DEFAULT = new Set(['maker', 'model', 'u', 'kind', 'ports', 'source']);
+//: The largest page the server serves (`PAGE` in routes/catalog.py).
+const _DCCAT_MAX_PAGE = 200;
+
+// The shared table's state. Visible columns and their order are per user (`table_config`
+// under `dccat`), like every other list; so is the page size, as an extra of the same entry.
+let _dccatVisibleCols = null;
+let _dccatColOrder = null;
+let _dccatPageSize = null;
+let _dccatCurrentPage = [];
+
+/** The page size in force: the chosen one, within what the server serves. */
+function _dcCatLimit() {
+    const n = Number(_dccatPageSize || _tableRowsDefault || 25);
+    return Math.max(1, Math.min(_DCCAT_MAX_PAGE, n > 0 ? n : _DCCAT_MAX_PAGE));
+}
+
+/** The columns this reader may have: «placed» only for whoever may see the inventory. The
+ *  height of a component is a size written as text, which sorts as text: not sortable there. */
+function _dcCatColsFor(ctx) {
+    const uso = ctx ? !!((ctx.d || {}).usage) : true;
+    return _DCCAT_COLS.filter(c => !c.usage || uso).map(c => (
+        c.id === 'u' && _dcCatTree === 'component-types'
+            ? Object.assign({}, c, {sortKey: null}) : c));
+}
+
+/** Las columnas a la vista, en el orden de la tabla. */
+function _dcCatCols() {
+    const on = _dccatVisibleCols || _DCCAT_COLS_DEFAULT;
+    const uso = !!(_dcCat || {}).usage;
+    const orden = (_dccatColOrder && _dccatColOrder.length) ? _dccatColOrder
+        : _DCCAT_COLS.map(c => c.id);
+    return orden.map(id => _DCCAT_COLS.find(c => c.id === id))
+        .filter(c => c && c.id !== 'img' && (c.always || on.has(c.id)) && (!c.usage || uso));
+}
+
+function _dcCatColOn(id) {
+    return _dcCatCols().some(c => c.id === id);
+}
+
+/** El hueco de la tabla: lo llena `_dcCatMount` cuando el panel ya está en el documento. */
+function _dcCatListHole() {
+    return `<div id="dccat-container" class="ss-vfill"></div>`;
+}
+
+/** Fill the hole, once the pane is written. Returns the table's render, so whoever drew the
+ *  pane can put the focus back into the search box when it exists. */
+function _dcCatMount() {
+    if (_dcLibTabNow() !== 'list' || !_dcCat) return null;
+    return typeof renderDcCat === 'function' ? renderDcCat() : null;
+}
+
+/** A row's click opens its drawer — but not the click that ticks its box, nor one on the
+ *  padding of the cell that holds it (a near miss of the box is not a request for the drawer). */
+function _dcCatRowClick(ev, uid) {
+    const el = ev && ev.target;
+    if (el && typeof el.closest === 'function') {
+        if (el.closest('input, button, a, label')) return;
+        const td = el.closest('td');
+        if (td && td.querySelector('input[type="checkbox"]')) return;
+    }
+    _dcLibModelDrawer(uid);
+}
+
+// ── La cabecera y la barra de dentro de la tarjeta ─────────────────────────────────────
+
+/** Left of the column chooser, as in Users and Brands: the import in progress and, to whoever
+ *  manages, «New model» and «Import…». */
+function _dcCatLeadHtml(ctx) {
+    return `${_dcLibPillHtml()}${(ctx || {}).puede ? `
+        <button class="btn btn-sm btn-secondary" onclick="_dcCatEdit(null)">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_new'))}</button>
+        <button class="btn btn-sm btn-primary" onclick="_dcLibImportOpen()">
+            <i class="bi bi-download me-1"></i>${esc(t('dcim_lib_import_btn'))}</button>` : ''}`;
+}
+
+/** What is done twice a year, out of the way: bring a JSON, empty a source. */
+function _dcCatMoreHtml(ctx) {
+    if (!(ctx || {}).puede) return '';
+    const fuentes = ((ctx.d || {}).sources) || [];
+    return `<div class="dropdown">
+        <button class="btn btn-sm btn-secondary" type="button" data-bs-toggle="dropdown"
+                aria-expanded="false" title="${escAttr(t('dcim_lib_more'))}"
+                aria-label="${escAttr(t('dcim_lib_more'))}"><i class="bi bi-three-dots"></i></button>
+        <ul class="dropdown-menu dropdown-menu-end py-1">
+            <li><button class="dropdown-item small" onclick="_dcPortImport(_dcCatOpen)">
+                <i class="bi bi-upload me-2"></i>${esc(t('dcim_lib_import_json'))}</button></li>
+            ${fuentes.length ? `<li><button class="dropdown-item small"
+                    onclick="_dcCatEmptySrc()"><i class="bi bi-eraser me-2"></i>${
+                    esc(t('dcim_cat_empty_src'))}</button></li>` : ''}
+        </ul>
+    </div>`;
+}
+
+/** Inside the card, under the header: the shapes and the view, the filters, the chips and —
+ *  over the table, with something ticked — the band. */
+function _dcCatToolsHtml(ctx, mode) {
+    const d = (ctx || {}).d || {};
+    const porMarca = _dcCatView === 'makers';
+    return `<div class="ss-card-tools">
+        <div class="ss-toolrow">
+            ${_dcCatTreesHtml(d)}
+            <div class="ss-toolrow-tools">
+                <div class="btn-group btn-group-sm" role="group"
+                     aria-label="${escAttr(t('dcim_lib_view_as'))}">
+                    <button class="btn ${porMarca ? 'btn-primary' : 'btn-secondary'}"
+                            onclick="_dcCatGoView('makers')">
+                        <i class="bi bi-grid-3x3-gap me-1"></i>${esc(t('dcim_cat_by_maker'))}</button>
+                    <button class="btn ${porMarca ? 'btn-secondary' : 'btn-primary'}"
+                            onclick="_dcCatGoView('list')">
+                        <i class="bi bi-list-ul me-1"></i>${esc(t('dcim_cat_as_list'))}</button>
+                </div>
+            </div>
+        </div>
+        <div class="ss-toolrow">
+            <input id="dccat-q" type="search" class="form-control form-control-sm"
+                   style="max-width:16rem" value="${escAttr(_dcCatQ)}"
+                   placeholder="${escAttr(t('dcim_lib_models_search'))}"
+                   aria-label="${escAttr(t('dcim_lib_models_search'))}"
+                   oninput="_dcCatQType(this.value)"
+                   onkeydown="if(event.key==='Enter'){_dcCatQ=this.value;_dcCatSearch()}">
+            ${_dcCatBrandSelect()}
+            <select class="form-select form-select-sm" style="max-width:12rem"
+                    aria-label="${escAttr(t('dcim_role'))}" onchange="_dcCatSetKind(this.value)">
+                <option value=""${_dcCatKind ? '' : ' selected'}>${
+                    esc(t('dcim_cat_any_kind'))}</option>
+                ${(d.kinds || []).map(k => `<option value="${escAttr(k.name)}"${
+                    _dcCatKind === k.name ? ' selected' : ''}>${
+                    esc(_dcCatKindName(k.name))} (${esc(String(k.count))})</option>`).join('')}
+            </select>
+            ${_dcCatSourceSelect(d)}
+        </div>
+        ${_dcCatChipsHtml(d)}
+        ${mode === 'table' ? _dcCatBandHtml() : ''}
+    </div>`;
+}
+
+/** How many models the library holds — the menu's figure; the page band says how many match. */
+function _dcCatCountAll(d) {
+    const n = (d.counts || {}).models;
+    return (n === undefined || n === null) ? Number(d.total || 0) : n;
+}
+
+/** Nothing to show: with something set, say so and offer the way out; with nothing, the
+ *  library is empty. */
+function _dcCatEmptyHtml() {
+    return _dcCatChips(_dcCat || {}).length
+        ? `<div class="text-center py-5 text-muted">
+               <i class="bi bi-funnel ss-empty-icon"></i>
+               <div>${esc(t('dcim_lib_no_results'))}</div>
+               <button class="btn btn-sm btn-secondary mt-3" onclick="_dcCatUnfilter('all')">${
+                   esc(t('dcim_lib_unfilter_all'))}</button></div>`
+        : `<div class="text-center py-5 text-muted">
+               <i class="bi bi-collection ss-empty-icon"></i>
+               <div>${esc(t('dcim_cat_empty'))}</div></div>`;
+}
+
+/** Edit, clone, place its ports and delete one model: the buttons the hand-built table carried
+ *  on every row, plus the port-map editor. That one is on EVERY row and disabled where there are
+ *  no ports or bays to place: left out, the group came out a button shorter on those rows and
+ *  the column went ragged. */
+function _dcCatRowActions(r) {
+    const uid = String(r.uid || '');
+    const situar = Number(r.ports_total || 0) + Number(r.bays_total || 0) > 0;
+    return `<div class="btn-group btn-group-sm" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+            onclick="_dcCatRowEdit(${jsStr(uid)}, false)"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('dcim_cat_clone'))}"
+            onclick="_dcCatRowEdit(${jsStr(uid)}, true)"><i class="bi bi-files"></i></button>
+        <button class="btn btn-secondary py-0 px-1"${situar
+            ? ` title="${escAttr(t('dcim_pm_open'))}" onclick="_dcPmOpen(${jsStr(uid)})"`
+            : ` disabled title="${escAttr(t('dcim_pm_no_ports'))}"`}><i class="bi bi-geo"></i></button>
+        <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+            onclick="_dcCatDrop(${jsStr(uid)}, ${jsStr(((r.manufacturer || '') + ' ' + (r.model || '')).trim())})">
+            <i class="bi bi-trash"></i></button>
+    </div>`;
+}
+
+createListTable({
+    key: 'dccat', containerId: 'dccat-container', tableId: 'dccat-table',
+    accent: 'blue', icon: 'bi-list-ul',
+    title: (ctx) => `${esc(t('dcim_cat_tab_list'))} <span
+        class="badge bg-secondary rounded-pill ms-1 ss-tabular">${esc(String(
+            _dcCatCountAll(ctx.d || {})))}</span>`,
+    columns: (ctx) => _dcCatColsFor(ctx),
+    defaultVisible: _DCCAT_COLS_DEFAULT,
+    // The thumbnail is not a column anyone chooses.
+    colChooserCols: (cols) => cols.filter(c => c.id !== 'img'),
+    persist: true, clearLabelKey: 'dcim_cat_tab_list',
+    persistExtra: () => (_dccatPageSize ? {ps: _dccatPageSize} : {}),
+    applyExtra: (cfg) => {
+        const n = Number((cfg || {}).ps || 0);
+        _dccatPageSize = n > 0 && n <= _DCCAT_MAX_PAGE ? n : null;
+    },
+    // What the table draws is what the server answered for the page, the sort and the size
+    // in force; when a click asks for another, fetch it first.
+    prepare: async () => {
+        if (_dcCat && _dcCat.args !== _dcCatQueryArgs()) await _dcCatLoad();
+        return {d: _dcCat || {}, puede: _dcimMay('dcim_catalog_manage')};
+    },
+    serverPaging: {
+        // The grid counts brands, the table models.
+        total: (ctx) => (_dcCatView === 'makers' ? ((ctx.d || {}).makers || []).length
+                                                 : Number((ctx.d || {}).total || 0)),
+        maxPageSize: _DCCAT_MAX_PAGE,
+    },
+    rows: (ctx) => ((ctx.d || {}).rows || []),
+    rowKey: (r) => String(r.uid || ''),
+    sortValue: () => '',
+    selectable: (ctx) => ctx.puede,
+    rowAttrs: (r) => ` class="ss-rowlink${_dcCatSel.has(String(r.uid)) ? ' table-active' : ''}"
+        onclick="_dcCatRowClick(event, ${jsStr(String(r.uid || ''))})"`,
+    cell: (r, id) => (id === 'img'
+        ? `<td>${r.front_image ? `<img src="${_dcimMediaUrl(r.front_image)}" alt=""
+              style="height:1.2rem;max-width:2.4rem;object-fit:contain">` : ''}</td>`
+        : _dcCatCell(r, id)),
+    // The row's own buttons, as every list of the panel has them: edit, clone and delete —
+    // the drawer the row opens has them too, but a list without its actions column reads as
+    // one that cannot be changed.
+    actions: (r) => _dcCatRowActions(r),
+    actionsVisible: (ctx) => ctx.puede,
+    bodyMode: () => (_dcCatView === 'makers' ? 'summary' : 'table'),
+    showChooser: (mode) => mode === 'table',
+    cardsBody: (pagina, ctx) => `<div class="p-3">${_dcCatMakersHtml(ctx.d || {})}</div>`,
+    headerLead: (ctx) => _dcCatLeadHtml(ctx),
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_dcCatOpen()"
+        title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+        esc(t('refresh'))}</button>`,
+    headerButtons: (ctx) => _dcCatMoreHtml(ctx),
+    toolbar: (ctx, mode) => _dcCatToolsHtml(ctx, mode),
+    emptyBody: () => _dcCatEmptyHtml(),
+    state: {
+        visible: {get: () => _dccatVisibleCols, set: v => { _dccatVisibleCols = v; }},
+        order: {get: () => _dccatColOrder, set: v => { _dccatColOrder = v; }},
+        // The page is where the list is (`_dcCatOff`), which every filter puts back to 0.
+        page: {get: () => Math.floor(_dcCatOff / _dcCatLimit()) + 1,
+               set: v => { _dcCatOff = Math.max(0, (Number(v) - 1) * _dcCatLimit()); }},
+        pageSize: {get: () => _dccatPageSize, set: v => { _dccatPageSize = v; }},
+        // Another order is another list: back to its first page.
+        sort: {get: () => _dcCatSort || 'maker',
+               set: v => { if (v !== (_dcCatSort || 'maker')) _dcCatOff = 0; _dcCatSort = v; }},
+        sortDir: {get: () => _dcCatDir,
+                  set: v => { if (v !== _dcCatDir) _dcCatOff = 0; _dcCatDir = v; }},
+        currentPage: {get: () => _dccatCurrentPage, set: v => { _dccatCurrentPage = v; }},
+        selected: () => _dcCatSel,
+    },
+    globalPrefix: {
+        render: 'renderDcCat', goPage: '_goDcCatPage', changePageSize: '_changeDcCatPageSize',
+        sort: '_sortDcCat', toggleCol: '_dccatToggleCol', resetCols: '_resetDccatCols',
+        saveOrder: '_dccatSaveColOrder', selectAll: '_dccatSelectAll',
+        toggleOne: '_dccatToggleOne', initFeatures: '_initDccatTableFeatures',
+    },
+});
+
+// The factory's handlers, with what this list adds: ticking withdraws a pending «remove?», and
+// a page size is a preference that is saved (the factory saves columns, not sizes).
+(() => {
+    const tick = window._dccatToggleOne, all = window._dccatSelectAll;
+    window._dccatToggleOne = (k, on) => { _dcCatAsk = false; return tick(k, on); };
+    window._dccatSelectAll = (on) => { _dcCatAsk = false; return all(on); };
+    const size = window._changeDcCatPageSize;
+    window._changeDcCatPageSize = (v) => { const r = size(v); _persistTableConfig(); return r; };
+})();
+
+/** Teclear en el buscador: se busca al dejar de teclear. La caja conserva el foco al volver la
+ *  respuesta (`_dcLibDraw`), así que se sigue escribiendo sin volver a pinchar. */
+function _dcCatQType(v) {
+    _dcCatQ = String(v || '');
+    clearTimeout(_dcCatQTimer);
+    _dcCatQTimer = setTimeout(_dcCatSearch, 450);
+}
+
+/** La marca, como FILA: las que tienen algún modelo, y al final «sin ficha». */
+function _dcCatBrandSelect() {
+    const marcas = ((_dcBrands || {}).rows || []).filter(b => Number(b.models || 0) > 0);
+    const puesta = _dcCatBrand;
+    return `<select class="form-select form-select-sm" style="max-width:12rem"
+            aria-label="${escAttr(t('dcim_cat_maker'))}" onchange="_dcCatSetBrand(this.value)">
+        <option value=""${puesta ? '' : ' selected'}>${esc(t('dcim_lib_any_brand'))}</option>
+        ${marcas.map(b => `<option value="${escAttr(b.uid)}"${
+            puesta === String(b.uid) ? ' selected' : ''}>${esc(b.name || '')} (${
+            esc(String(b.models || 0))})</option>`).join('')}
+        <option value="none"${puesta === 'none' ? ' selected' : ''}>${
+            esc(t('dcim_lib_brand_none'))}</option>
+    </select>`;
+}
+
+/** El origen: los que hay, con su cuenta, por un nombre que se entiende. */
+function _dcCatSourceSelect(d) {
+    const fuentes = d.sources || [];
+    return `<select class="form-select form-select-sm" style="max-width:12rem"
+            aria-label="${escAttr(t('dcim_cat_source'))}" onchange="_dcCatSetSrc(this.value)">
+        <option value=""${_dcCatSrc ? '' : ' selected'}>${esc(t('dcim_lib_any_source'))}</option>
+        ${fuentes.filter(f => f.name).map(f => `<option value="${escAttr(f.name)}"${
+            _dcCatSrc === f.name ? ' selected' : ''}>${esc(_dcCatSrcName(f.name))} (${
+            esc(String(f.count || 0))})</option>`).join('')}
+        ${fuentes.some(f => f.name === 'manual') ? '' : `<option value="manual"${
+            _dcCatSrc === 'manual' ? ' selected' : ''}>${esc(_dcCatSrcName('manual'))}</option>`}
+    </select>`;
+}
+
+/** Cómo se llama un origen: los dos del panel con su nombre, los demás como se etiquetaron. */
+function _dcCatSrcName(s) {
+    const v = String(s || '');
+    if (v === 'manual' || v === '') return t('dcim_lib_src_manual');
+    if (v === 'core') return t('dcim_lib_src_core');
+    return v;
+}
+
+// ── Lo puesto, en fichas ────────────────────────────────────────────────────────────────
+
+/** Cada filtro puesto, con su nombre legible: ``[[clave, rótulo], …]``. */
+function _dcCatChips(d) {
+    const out = [];
+    const imp = String(_dcCatImp || '');
+    if (imp) {
+        const [fuente, cuando] = imp.split('@');
+        out.push(['import', tf('dcim_lib_chip_import', _dcCatSrcName(fuente), _dcLibDay(cuando))]);
+    }
+    if (_dcCatImg) out.push(['img', t('dcim_lib_q_no_image')]);
+    if (_dcCatNoPorts) out.push(['ports', t('dcim_lib_q_no_ports')]);
+    if (_dcCatUnused) out.push(['unused', t('dcim_lib_q_unused')]);
+    if (_dcCatTree) out.push(['tree', _dcCatTreeName(_dcCatTree)]);
+    if (_dcCatBrand) {
+        const fila = ((_dcBrands || {}).rows || []).find(b => String(b.uid) === _dcCatBrand);
+        out.push(['brand', _dcCatBrand === 'none' ? t('dcim_lib_brand_none')
+                  : tf('dcim_lib_chip_brand', (fila || {}).name || _dcCatBrandName || '?')]);
+    }
+    if (_dcCatMaker) out.push(['maker', tf('dcim_lib_chip_brand', _dcCatMaker)]);
+    if (_dcCatKind) out.push(['kind', tf('dcim_lib_chip_kind', _dcCatKindName(_dcCatKind))]);
+    if (_dcCatSrc) out.push(['source', tf('dcim_lib_chip_source', _dcCatSrcName(_dcCatSrc))]);
+    if (_dcCatQ) out.push(['q', tf('dcim_lib_chip_q', _dcCatQ)]);
+    return out;
+}
+
+function _dcCatChipsHtml(d) {
+    const fichas = _dcCatChips(d);
+    if (!fichas.length) return '';
+    return `<div class="d-flex flex-wrap align-items-center gap-1">
+        <span class="text-muted ss-fs-2 me-1">${esc(t('dcim_lib_filters'))}</span>
+        ${fichas.map(([k, rot]) => `<button class="btn btn-sm btn-primary rounded-pill py-0"
+                onclick="_dcCatUnfilter(${jsStr(k)})"
+                aria-label="${escAttr(tf('dcim_lib_unfilter', rot))}">${esc(rot)}
+            <i class="bi bi-x-lg ms-1"></i></button>`).join('')}
+        ${fichas.length > 1 ? `<button class="btn btn-sm btn-secondary py-0"
+            onclick="_dcCatUnfilter('all')">${esc(t('dcim_lib_unfilter_all'))}</button>` : ''}
+    </div>`;
+}
+
+/** Quitar un filtro —o todos—. Vuelve a la primera página: la fila 400 de lo que había no es
+ *  la fila 400 de lo que hay. */
+function _dcCatUnfilter(k) {
+    if (k === 'all') _dcCatFiltersReset();
+    else if (k === 'import') _dcCatImp = '';
+    else if (k === 'img') _dcCatImg = '';
+    else if (k === 'ports') _dcCatNoPorts = '';
+    else if (k === 'unused') _dcCatUnused = '';
+    else if (k === 'tree') _dcCatTree = '';
+    else if (k === 'brand') { _dcCatBrand = ''; _dcCatBrandName = ''; }
+    else if (k === 'maker') _dcCatMaker = '';
+    else if (k === 'kind') _dcCatKind = '';
+    else if (k === 'source') _dcCatSrc = '';
+    else if (k === 'q') _dcCatQ = '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+/** El día de un instante ISO, que es lo que se lee de una importación. */
+function _dcLibDay(iso) {
+    return String(iso || '').slice(0, 10);
+}
+
+// ── Lo marcado: su franja ───────────────────────────────────────────────────────────────
+
+function _dcCatBandHtml() {
+    if (!_dcimMay('dcim_catalog_manage')) return '';
+    const n = _dcCatSel.size;
+    if (!n) return '';
+    if (_dcCatAsk) {
+        return `<div class="ss-selband ss-selband-danger">
+            <strong class="ss-fs-2">${esc(tf('dcim_cat_drop_sel_ask', n))}</strong>
+            <span class="text-muted ss-fs-2">${esc(t('dcim_lib_drop_hint'))}</span>
+            <span class="ms-auto d-flex gap-1">
+                <button class="btn btn-sm btn-danger" onclick="_dcCatDropSelGo()">
+                    <i class="bi bi-trash me-1"></i>${esc(tf('dcim_lib_drop_n', n))}</button>
+                <button class="btn btn-sm btn-secondary" onclick="_dcCatAsk=false;renderDcim()">
+                    ${esc(t('cancel'))}</button>
+            </span></div>`;
+    }
+    return `<div class="ss-selband">
+        <strong class="ss-fs-2 ss-tabular">${esc(tf('dcim_lib_marked', n))}</strong>
+        <button class="btn btn-sm btn-secondary"
+                onclick="_dcPortExport(Array.from(_dcCatSel), [])">
+            <i class="bi bi-download me-1"></i>${esc(t('dcim_lib_export_json'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_dcCatSelAll(false, true)">
+            <i class="bi bi-x-lg me-1"></i>${esc(t('dcim_cat_sel_none'))}</button>
+        <span class="ms-auto">
+            <button class="btn btn-sm btn-danger" onclick="_dcCatAsk=true;renderDcim()">
+                <i class="bi bi-trash me-1"></i>${esc(t('dcim_lib_drop_ask'))}</button>
+        </span></div>`;
+}
+
+// ── La rejilla y la tabla ───────────────────────────────────────────────────────────────
+
+/** Cambiar de vista. Los filtros se quedan —el buscador dice lo mismo en las dos—, y lo que se
+ *  pide al servidor es lo mismo: la rejilla cuenta lo que la tabla lista. */
+function _dcCatGoView(cual) {
+    _dcCatView = cual === 'makers' ? 'makers' : 'list';
+    _dcCatOff = 0;
+    _dcCatUrlSave();
+    renderDcim();
+}
+
+/** Bajar a un fabricante: la tabla, ya acotada. De trescientas cajas a las cuarenta de HPE. */
+function _dcCatPickMaker(nombre) {
+    _dcCatMaker = nombre;
+    _dcCatView = 'list';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+/** Las marcas, con cuántos de SUS modelos coinciden con lo puesto. */
+function _dcCatMakersHtml(d) {
+    const vs = (d.makers || []).map(m => Array.isArray(m) ? {name: m[0], count: m[1]} : m);
+    if (!vs.length) {
+        return `<div class="text-muted ss-fs-2">${
+            esc(_dcCatChips(d).length ? t('dcim_lib_no_results') : t('dcim_cat_empty'))}</div>`;
+    }
+    const cuantos = vs.reduce((a, m) => a + (m.count || 0), 0);
+    return `<div class="ss-fs-2 text-muted mb-2">${
+            esc(tf('dcim_cat_makers_note', vs.length, cuantos))} · ${
+            esc(t('dcim_lib_grid_note'))}</div>
+        <div class="ss-piece-list">${vs.map(m => `<button
+            class="btn btn-secondary ss-piece" onclick="_dcCatPickMaker(${
+                jsStr(String(m.name || ''))})">
+            <i class="bi bi-tag"></i>
+            <span>${esc(m.name || '')}</span>
+            <small class="ss-tabular">${esc(String(m.count || 0))}</small>
+        </button>`).join('')}</div>`;
+}
+
+/** Una celda de la tabla. */
+function _dcCatCell(r, id) {
+    const esComp = _dcCatTree === 'component-types';
+    if (id === 'maker') {
+        return `<td class="ss-fs-2">${esc(r.manufacturer || '')}${String(r.brand_uid || '')
+            ? '' : ` <span class="badge text-bg-warning fw-normal">${
+                esc(t('dcim_lib_no_sheet'))}</span>`}</td>`;
+    }
+    if (id === 'model') {
+        return `<td class="fw-semibold ss-fs-2">${esc(r.model || '')}${_dcCatKindBadge(r)}</td>`;
+    }
+    if (id === 'u') {
+        return `<td class="text-end ss-tabular ss-fs-2">${esc(esComp ? (r.size || '')
+            : ((Number(r.u_tenths || 0)) / 10).toString())}</td>`;
+    }
+    if (id === 'kind') {
+        return `<td class="ss-fs-2"><span class="badge bg-body-secondary text-body-secondary
+            border fw-normal">${_dcCatKindIcon(r.kind)}${esc(_dcCatKindName(r.kind))}</span></td>`;
+    }
+    if (id === 'ports') {
+        return `<td class="text-muted ss-fs-1">${esc(_dcCatPorts(r))}${_dcPmBadge(r)}</td>`;
+    }
+    if (id === 'source') return `<td class="text-muted ss-fs-1">${esc(_dcCatSrcName(r.source))}</td>`;
+    if (id === 'placed') {
+        return `<td class="text-end ss-tabular ss-fs-2">${
+            esc(Number(r.placed || 0) ? String(r.placed) : '')}</td>`;
+    }
+    if (id === 'imported') {
+        return `<td class="text-muted ss-fs-1 ss-tabular">${esc(_dcLibDay(r.imported_at))}</td>`;
+    }
+    return '<td></td>';
+}
+
+// ── Los filtros ─────────────────────────────────────────────────────────────────────────
+
+/** Filtrar por clase. Va al servidor y vuelve a la primera página: la fila 400 de «todo» no es
+ *  la fila 400 de «switches», y quedarse donde se estaba deja la tabla vacía sin explicar por
+ *  qué. */
+function _dcCatSetKind(kind) {
+    _dcCatKind = kind || '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+/** Filtrar por marca, como fila (`none`: la escrita sin ficha). */
+function _dcCatSetBrand(uid) {
+    _dcCatBrand = String(uid || '');
+    _dcCatBrandName = '';
+    _dcCatMaker = '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+function _dcCatSetSrc(src) {
+    _dcCatSrc = String(src || '');
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+/** Las cuatro formas del catálogo, con su cuenta y a la vista.
+ *
+ *  Estaban en un desplegable entre los filtros, y por eso los componentes «no estaban»: para
+ *  llegar a ellos había que saber que existía un filtro por forma, abrirlo y elegir. Una sección
+ *  a la que hay que llegar adivinando es una sección que no existe.
+ *
+ *  Cada cuenta es la de esa forma CON LO DEMÁS PUESTO: «Módulos 12» dice adónde lleva el botón. */
+function _dcCatTreesHtml(d) {
+    const cuenta = (a) => ((d.tree_counts || []).find(x => x.name === a) || {}).count || 0;
+    const boton = (valor, etiqueta, icono, n) => `<button class="btn ${
+            _dcCatTree === valor ? 'btn-primary' : 'btn-secondary'}"
+            onclick="_dcCatSetTree(${jsStr(valor)})">
+        ${icono ? `<i class="bi ${escAttr(icono)} me-1"></i>` : ''}${esc(etiqueta)}
+        <span class="ss-tabular ms-1">${esc(String(n))}</span></button>`;
+    return `<div class="btn-group btn-group-sm flex-wrap" role="group"
+                 aria-label="${escAttr(t('dcim_cat_kind'))}">
+        ${boton('', t('dcim_cat_all_trees'), 'bi-collection', d.total_all || 0)}
+        ${(d.trees || []).map(a => boton(a, _dcCatTreeName(a), _DC_TREE_ICON[a],
+                                         cuenta(a))).join('')}
+    </div>`;
+}
+
+/** Filtrar por forma. Se lleva la clase por delante a propósito: las clases de un componente y
+ *  las de un dispositivo son dos vocabularios distintos, y quedarse con «switch» puesto al pasar
+ *  a componentes dejaría la tabla vacía sin explicar por qué. */
+function _dcCatSetTree(tree) {
+    _dcCatTree = tree || '';
+    _dcCatKind = '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+// ── Quitar lo marcado ───────────────────────────────────────────────────────────────────
+//
+// Marcar cruza páginas a propósito: lo que sobra suele ser media importación, y obligar a
+// quitarla página a página sería obligar a hacer diez veces la misma confirmación.
+
+/** Marcar o desmarcar **la página**, que es lo que se está viendo. Con *todo*, desmarcar todo lo
+ *  marcado, también lo de otras páginas: es lo que pide «Desmarcar» en la franja.
+ *
+ *  «Todos» no puede significar los seis mil: nadie ha visto los otros cinco mil ochocientos, y
+ *  un botón que borra lo que no se ha mirado no es un atajo. Para eso está vaciar un origen,
+ *  que sí dice en voz alta cuántos son. */
+function _dcCatSelAll(si, todo) {
+    if (!si && todo) {
+        _dcCatSel = new Set();
+    } else {
+        ((_dcCat || {}).rows || []).forEach(r => {
+            if (si) _dcCatSel.add(String(r.uid)); else _dcCatSel.delete(String(r.uid));
+        });
+    }
+    _dcCatAsk = false;
+    renderDcim();
+}
+
+/** Quitar lo marcado, ya confirmado en la franja. */
+async function _dcCatDropSelGo() {
+    if (!_dcCatSel.size) return;
+    _dcCatAsk = false;
+    const r = await _dcimSend('POST', '/api/v1/dcim/catalog/drop',
+                              {uids: Array.from(_dcCatSel)});
+    if (!r.ok) { renderDcim(); return showToast(r.error || t('save_failed'), 'danger'); }
+    showToast(tf('dcim_cat_dropped', (r.data || {}).count || 0), 'success');
+    _dcCatFresh();
+}

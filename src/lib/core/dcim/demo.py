@@ -13,8 +13,8 @@ columns, doors, a cabinet with its shelves) and two companies. Three small sites
 centre in Barcelona, an office in Texas and one in Puerto Rico— exist so the WAN links have
 somewhere to land: two between Demo and its recovery centre for HA, the IPsec one down.
 
-Every word the demo writes comes from ``data/demo/<lang>.json``, so it is built in the
-installation's language. Only the main site's name, «Demo», is the same in all of them.
+Every word the demo writes comes from the ``dcim_demo_words`` section of the core lang files
+(:data:`WORDS`), so it is built in the installation's language. Only the main site's name, «Demo», is the same in all of them.
 
 Written to the store directly and not through the HTTP API: it runs from the command line, with
 no panel. Every bolted item is checked with :meth:`DcimStore.fits` before it is written, the
@@ -23,10 +23,10 @@ same rule the API applies, so the demo can never hold a placement the panel woul
 
 from __future__ import annotations
 
-import glob
-import io
-import json
-import os
+import copy
+
+from lib.db.schema import Column, TableSpec
+from lib.i18n import TRANSLATIONS
 
 from lib.core.dcim import demo_faces
 from lib.core.dcim import media as dcim_media
@@ -40,8 +40,9 @@ UID_KEYS = ('site',) + BRANCHES
 #: The demo's own catalogue models: their maker, and the origin that marks them as the demo's.
 MAKER = 'Demo'
 SOURCE = 'demo'
-#: The texts, one file per language. `es_ES` is the base a partial translation falls back to.
-TEXTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'demo')
+#: The section of the core lang files that holds the demo's words. `es_ES` is the base a partial
+#: translation falls back to.
+WORDS = 'dcim_demo_words'
 _BASE_LANG = 'es_ES'
 
 #: The building: 30 × 20 m, a 300 mm outer wall, interior partitions of 120 mm.
@@ -62,7 +63,98 @@ _AIRFLOW = {'server': 'front-to-rear', 'gpu': 'front-to-rear', 'node': 'front-to
             'storage': 'front-to-rear', 'tor': 'rear-to-front', 'access': 'rear-to-front',
             'core': 'front-to-rear', 'router': 'front-to-rear', 'cpe': 'passive',
             'firewall': 'front-to-rear', 'patch': 'none', 'fiber': 'none',
-            'console': 'passive', 'kvm': 'passive', 'mini': 'side-to-rear'}
+            'console': 'passive', 'kvm': 'passive', 'mini': 'side-to-rear',
+            # A strip and a blanking panel do not breathe; a UPS does, front to back. A PC, a
+            # display or a printer breathes on its own, out of any aisle.
+            'pdu0u16': 'passive', 'pdu0u32': 'passive', 'pdu0u3p': 'passive',
+            'pdu1u': 'passive', 'ups1k5': 'front-to-rear', 'ups3k': 'front-to-rear',
+            'ups6k': 'front-to-rear', 'blank': 'none', 'cablemgr': 'none', 'shelf': 'none',
+            'pc': 'front-to-rear', 'phone': 'passive', 'ap': 'passive', 'camera': 'passive',
+            'display': 'passive', 'printer': 'side-to-rear',
+            # Modules move air with their device; what goes inside is cooled by it.
+            'psu800': 'front-to-rear', 'psu2000': 'front-to-rear', 'psu500': 'front-to-rear',
+            'psu1100': 'front-to-rear', 'psu400': 'front-to-rear', 'pcm': 'front-to-rear',
+            'fansrv': 'front-to-rear', 'fantray': 'front-to-rear'}
+
+#: Which cabinet model each of the demo's racks is, by its height, width and depth. A rack the
+#: demo writes with another size has no model and is refused (`DemoError`): every cabinet of the
+#: demo is one of its catalogue's.
+_RACK_MODELS = {(42, 600, 1200): 'rack612', (42, 800, 1000): 'rack810',
+                (42, 600, 1000): 'rack610', (24, 600, 800): 'rack608', (12, 600, 450): 'wall12'}
+
+#: The demo's own platforms —the firmware and systems of its fictitious devices, maker «Demo»—:
+#: name → (kind, family, version, life). Language-free, as a product's name is. Removed with the
+#: demo when nothing else uses them.
+PLATFORMS = {
+    'DM-NOS 7.4': ('firmware', 'DM-NOS', '7.4', {'launched': '2023-03-01',
+                                                 'end_of_maintenance': '2027-03-31',
+                                                 'end_of_security': '2028-03-31',
+                                                 'eol': '2028-03-31'}),
+    'DM-RTOS 17.9': ('firmware', 'DM-RTOS', '17.9', {'launched': '2022-07-15',
+                                                     'end_of_maintenance': '2025-12-31',
+                                                     'end_of_security': '2026-12-31',
+                                                     'eol': '2026-12-31'}),
+    'DM-SecOS 7.2': ('appliance', 'DM-SecOS', '7.2', {'launched': '2024-02-01',
+                                                      'end_of_maintenance': '2028-02-29',
+                                                      'end_of_security': '2029-02-28',
+                                                      'eol': '2029-02-28'}),
+    'DM-SAN OS 6.1': ('appliance', 'DM-SAN OS', '6.1', {'launched': '2023-09-04',
+                                                        'end_of_security': '2028-04-30',
+                                                        'eol': '2028-04-30'}),
+    'DM-Console OS 5.2': ('firmware', 'DM-Console OS', '5.2', {'launched': '2019-05-06',
+                                                               'end_of_security': '2025-12-31',
+                                                               'eol': '2026-06-30'}),
+}
+#: The public systems the demo's servers run: the general catalogue's basics, brought in if this
+#: installation has not brought them yet. Real, so they stay when the demo goes, as the access
+#: control models do.
+REAL_PLATFORMS = ('Debian 12', 'Ubuntu 24.04 LTS')
+
+#: The demo's templates: model key → (platform, [(fitted model key, [bays])]). A device of the
+#: demo of one of these models is created from its template, as the panel does, and its parts
+#: are the template's copied. The bays are the model's own (checked when the template is
+#: written): an RDIMM in «DIMM A1», a supply in «PSU bay 1».
+_DIMMS_R2 = ['DIMM A%d' % i for i in range(1, 9)] + ['DIMM B%d' % i for i in range(1, 9)]
+_DIMMS_G2 = ['DIMM A%d' % i for i in range(1, 13)] + ['DIMM B%d' % i for i in range(1, 13)]
+BUILDS = {
+    'server': ('Debian 12', [('cpu32', ['CPU1', 'CPU2']), ('rdimm32', _DIMMS_R2),
+                             ('nvme192', ['Bay %d' % i for i in range(8)]),
+                             ('m2boot', ['M.2 1', 'M.2 2']),
+                             ('psu800', ['PSU bay 1', 'PSU bay 2']),
+                             ('fansrv', ['Fan %d' % i for i in range(1, 7)]),
+                             ('ocp25', ['OCP 3.0'])]),
+    'gpu': ('Ubuntu 24.04 LTS', [('cpu32', ['CPU1', 'CPU2']), ('rdimm64', _DIMMS_G2),
+                                 ('nvme192', ['Bay %d' % i for i in range(4)]),
+                                 ('m2boot', ['M.2 1', 'M.2 2']),
+                                 ('gpu24', ['GPU %d' % i for i in range(1, 9)]),
+                                 ('psu2000', ['PSU bay 1', 'PSU bay 2']),
+                                 ('fansrv', ['Fan %d' % i for i in range(1, 7)]),
+                                 ('ocp25', ['OCP 3.0'])]),
+    'node': ('Debian 12', [('cpu32', ['CPU1']),
+                           ('rdimm32', ['DIMM A%d' % i for i in range(1, 9)]),
+                           ('nvme192', ['Bay 0', 'Bay 1']), ('m2boot', ['M.2 1']),
+                           ('psu500', ['PSU bay 1', 'PSU bay 2']),
+                           ('fansrv', ['Fan %d' % i for i in range(1, 5)])]),
+    'storage': ('DM-SAN OS 6.1', [('hdd8t', ['Disk %d' % i for i in range(24)]),
+                                  ('pcm', ['PSU bay 1', 'PSU bay 2']),
+                                  ('ctrl', ['Controller A', 'Controller B']),
+                                  ('bbu', ['BBU A', 'BBU B'])]),
+    'tor': ('DM-NOS 7.4', [('psu1100', ['PSU bay 1', 'PSU bay 2']),
+                           ('fantray', ['Fan 1', 'Fan 2'])]),
+    'access': ('DM-NOS 7.4', []),
+    'core': ('DM-NOS 7.4', [('psu1100', ['PSU bay 1', 'PSU bay 2']),
+                            ('fantray', ['Fan %d' % i for i in range(1, 5)])]),
+    'router': ('DM-RTOS 17.9', [('psu400', ['PSU bay 1', 'PSU bay 2']),
+                                ('fantray', ['Fan tray'])]),
+    'cpe': ('DM-RTOS 17.9', []),
+    'firewall': ('DM-SecOS 7.2', [('psu400', ['PSU bay 1', 'PSU bay 2']),
+                                  ('fantray', ['Fan %d' % i for i in range(1, 4)]),
+                                  ('ssd480', ['SSD'])]),
+    'console': ('DM-Console OS 5.2', []),
+    'mini': ('Debian 12', [('sodimm16', ['SODIMM 1', 'SODIMM 2']), ('m2boot', ['M.2 SSD'])]),
+}
+#: The optic each fibre takes in an SFP+ cage: short reach on multimode, long on single-mode.
+_OPTIC = {'om3': 'sfp10sr', 'om4': 'sfp10sr', 'os2': 'sfp10lr'}
 
 
 #: Where a rack's two PDUs go (`_Builder.pdus`). The usual: a vertical one in each rear channel,
@@ -74,28 +166,185 @@ PDU_SAME_LEFT = ({'side_pos': 'rear-left', 'side_slot': 0},
                  {'side_pos': 'rear-left', 'side_slot': 1})
 
 
+#: The version of the demo's CONTENT. **Bump it with every change to what the demo writes** —a
+#: model, a picture, a room, a cable, a text—, so an installation can tell whether the demo it
+#: holds is the one this code would write and offer to update it. 1 was the demo before its
+#: catalogue was complete; 2 is the one with a model of everything it places, in every tree;
+#: 3 is the one watched like a real installation (`demo_monitor`: devices, clusters, checks,
+#: SNMP agents, history and logs); 4 is the one whose office devices and fans are of their own
+#: class in the catalogue (`pc`, `phone`, `ap`, `camera`, `display`, `printer`, `fan`); 5 is
+#: the one whose UPSs and PDUs are monitored devices too, through UPS-MIB and ENTITY-SENSOR-MIB.
+#: `tests/integration/test_dcim_demo_version.py` keeps a fingerprint of the content next to
+#: this number and fails, saying «bump DEMO_VERSION», when one moves without the other.
+DEMO_VERSION = 5
+
+#: What the panel remembers of the demo installed here: which version, when and by whom. One
+#: row, written at the end of an install and deleted by a removal. A table and not a key in
+#: the configuration: it is a fact about the data in this database —it travels with a backup of
+#: it and is true on any engine— and not a setting anybody edits.
+STATE = TableSpec(
+    name='dc_demo',
+    columns=(
+        Column('uid', 'TEXT', primary_key=True),
+        Column('version', 'INTEGER', nullable=False, default='0'),
+        Column('lang', 'TEXT', nullable=False, default="''"),
+        Column('installed_at', 'TEXT', nullable=False, default="''"),
+        Column('installed_by', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
+    ),
+)
+
+
 class DemoError(Exception):
     """The demo cannot be built as asked (it already exists, a placement does not fit)."""
 
 
-def _load(path: str) -> dict:
-    with io.open(path, encoding='utf-8') as fh:
-        return json.load(fh)
+def _state_rows(store):
+    from lib.db.rows import Rows                        # noqa: PLC0415
+    filas = Rows(store._db, STATE)                      # noqa: SLF001
+    filas.bootstrap()
+    return filas
+
+
+def state(store) -> dict:
+    """What is installed and what this code would install: ``{installed, sites, version,
+    installed_version, installed_at, installed_by, outdated}``. ``installed_version`` is 0 for a
+    demo installed before versions were recorded, which is older than any."""
+    sitios = find(store)
+    fila = next(iter(_state_rows(store).list()), None) if sitios else None
+    hay = int((fila or {}).get('version') or 0)
+    return {'installed': bool(sitios), 'sites': [str(x.get('name') or '') for x in sitios],
+            'version': DEMO_VERSION,
+            'installed_version': hay if sitios else None,
+            'installed_at': str((fila or {}).get('installed_at') or '') or None,
+            'installed_by': str((fila or {}).get('installed_by') or '') or None,
+            'outdated': bool(sitios) and hay < DEMO_VERSION}
+
+
+def _record(store, actor: str, lang: str) -> None:
+    from datetime import datetime, timezone             # noqa: PLC0415
+    filas = _state_rows(store)
+    for f in filas.list():
+        filas.delete(f['uid'])
+    filas.create({'version': DEMO_VERSION, 'lang': str(lang or ''),
+                  'installed_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                  'installed_by': str(actor or '')}, actor=actor)
+
+
+def _forget_state(store) -> None:
+    filas = _state_rows(store)
+    for f in filas.list():
+        filas.delete(f['uid'])
+
+
+# ── Other parts of the demo ──────────────────────────────────────────────────────────────────
+
+class DemoPart:
+    """Something else the demo installs, declared by its own module: see `register_part`."""
+
+    def __init__(self, name: str, install, remove, steps=()):
+        self.name, self.install, self.remove = str(name), install, remove
+        self.steps = tuple(steps)
+
+
+#: The parts registered, in the order they were. Installed after the inventory, removed before.
+DEMO_PARTS: list = []
+
+
+def register_part(name: str, install, remove, steps=()) -> DemoPart:
+    """Join another part to the demo without editing this module.
+
+    *install(ctx, progress)* runs after the inventory is written, and *remove(ctx, progress)*
+    before it is removed (also when no demo site is left, so a half-removed demo converges):
+    both must be idempotent. *ctx* is a `DemoContext`; *progress(step_key, done=None,
+    total=None)* reports where the part is — *step_key* one of *steps*, whose texts are
+    ``step_<key>`` in the demo's words (:data:`WORDS`, or the key itself). A part that raises fails the
+    install like any step: the step it was in is reported and the whole demo is removed. Names
+    are unique; registering one again replaces it."""
+    parte = DemoPart(name, install, remove, steps)
+    DEMO_PARTS[:] = [x for x in DEMO_PARTS if x.name != parte.name] + [parte]
+    return parte
+
+
+class DemoContext:
+    """What a part is handed. ``store`` (the inventory's `DcimStore`), ``db`` (its connector),
+    ``app`` (the web admin when the panel installs, ``None`` from the command line), ``actor``,
+    ``lang``, ``words`` (the demo's texts in that language), ``var_dir`` / ``media_dir`` and
+    ``created``: on install ``{'sites': {key: uid}, 'orgs': {'operator', 'customer'},
+    'models': {model key: type uid}, 'items': {label: item uid}, 'racks': {name: [uid]}}``; on
+    remove ``{'sites': {name: uid}}`` of the demo sites still there."""
+
+    def __init__(self, store, *, app=None, actor='', lang='', words=None, var_dir='',
+                 media_dir='', created=None):
+        self.store, self.db, self.app = store, store._db, app       # noqa: SLF001
+        self.actor, self.lang, self.words = actor, lang, dict(words or {})
+        self.var_dir, self.media_dir = var_dir, media_dir
+        self.created = dict(created or {})
+
+
+# ── Progress ─────────────────────────────────────────────────────────────────────────────────
+
+#: The steps of an install, in order: what the progress reports and divides the bar by.
+BUILD_STEPS = ('models', 'builds', 'orgs', 'sites', 'power', 'floors', 'main', 'branches',
+               'cabling', 'outlets', 'optics', 'states')
+#: And of a removal.
+REMOVE_STEPS = ('remove_parts', 'remove_sites', 'remove_catalogue')
+
+
+class Progress:
+    """Where an install or a removal is, told to *sink* as ``{step, step_key, step_no,
+    steps_total, done, total, percent}``. Each step's text is ``step_<key>`` in the demo's words.
+    Without a sink it only remembers the step it is in, which is what a failure reports."""
+
+    def __init__(self, sink=None, words=None, steps=()):
+        self.sink, self.w = sink, dict(words or {})
+        self.steps = list(steps)
+        self.key = ''
+
+    def plan(self, steps) -> None:
+        self.steps = list(steps)
+
+    def __call__(self, key: str, done=None, total=None) -> None:
+        self.key = str(key)
+        if self.sink is None:
+            return
+        n = self.steps.index(self.key) if self.key in self.steps else max(0, len(self.steps) - 1)
+        parte = (float(done) / float(total)) if total else 0.0
+        hecho = (n + min(1.0, max(0.0, parte))) / max(1, len(self.steps))
+        self.sink({'step_key': self.key,
+                   'step': str(self.w.get('step_' + self.key) or self.key),
+                   'step_no': n + 1, 'steps_total': len(self.steps),
+                   'done': done, 'total': total,
+                   'percent': 100 if self.key == 'done' else int(hecho * 100)})
+
+
+def _part_progress(prog: Progress):
+    def avisa(key, done=None, total=None):
+        prog(key, done, total)
+    return avisa
+
+
+def _words(lang: str) -> dict:
+    """The demo's words as *lang* has them, or ``{}`` for a language nobody worded."""
+    return dict((TRANSLATIONS.get(str(lang or '')) or {}).get(WORDS) or {})
 
 
 def texts(lang: str = '') -> dict:
-    """The demo's words in *lang*, completed from the base language where it says nothing."""
-    out = _load(os.path.join(TEXTS_DIR, _BASE_LANG + '.json'))
-    own = os.path.join(TEXTS_DIR, '%s.json' % os.path.basename(str(lang or '')))
-    if lang and lang != _BASE_LANG and os.path.isfile(own):
-        out.update(_load(own))
+    """The demo's words in *lang*, completed from the base language where it says nothing.
+
+    A copy: the lists in it (the spares, the tools) are the lang file's own objects."""
+    out = copy.deepcopy(_words(_BASE_LANG))
+    if lang and lang != _BASE_LANG:
+        out.update(copy.deepcopy(_words(lang)))
     return out
 
 
 def _every(key: str) -> set:
     """What *key* is called in every language: the demo is found by name whichever language
     built it, so a panel switched to English can still remove a demo built in Spanish."""
-    return {str(_load(p).get(key) or '') for p in glob.glob(os.path.join(TEXTS_DIR, '*.json'))} - {''}
+    return {str(_words(lang).get(key) or '') for lang in TRANSLATIONS} - {''}
 
 
 def find(store) -> list[dict]:
@@ -114,21 +363,40 @@ def find(store) -> list[dict]:
 
 # ── Removing ─────────────────────────────────────────────────────────────────────────────────
 
-def remove(store, *, var_dir: str = '', media_dir: str = '') -> int:
+def remove(store, *, var_dir: str = '', media_dir: str = '', progress=None,
+           app=None) -> int:
     """Delete the demo sites and everything under them. Returns how many sites went.
 
-    Bottom-up, so nothing is ever left pointing at a parent that is gone: cables and feeds, then
-    items with their parts, PDUs, racks, features, rows, rooms, walls, floors with their plan
-    files, sources, links and finally the sites. The two demo companies stay when anything else
-    still names them; otherwise they go too.
+    First the parts other modules joined (`register_part`), then the inventory bottom-up, so
+    nothing is ever left pointing at a parent that is gone: cables and feeds, then items with
+    their parts, PDUs, racks, features, rows, rooms, walls, floors with their plan files,
+    sources, links and finally the sites. The two demo companies stay when anything else still
+    names them; otherwise they go too. Then the catalogue it wrote and the record of which
+    version was installed. *progress* is a `Progress` (or ``None``).
     """
+    prog = progress if isinstance(progress, Progress) else Progress(progress, texts(''),
+                                                                    REMOVE_STEPS)
+    if not prog.steps:
+        prog.plan(REMOVE_STEPS)
     sites = find(store)
+    ctx = DemoContext(store, app=app, var_dir=var_dir, media_dir=media_dir,
+                      words=prog.w, created={'sites': {s['name']: s['uid'] for s in sites}})
+    prog('remove_parts', 0, len(DEMO_PARTS))
+    for n, parte in enumerate(reversed(DEMO_PARTS)):
+        parte.remove(ctx, _part_progress(prog))
+        prog('remove_parts', n + 1, len(DEMO_PARTS))
     if not sites:
+        # Nothing of the sites, but maybe what a half-finished one left of its catalogue: a
+        # demo model, template or platform nobody uses goes, so removing twice converges.
+        prog('remove_catalogue')
+        _remove_catalogue(store, var_dir, media_dir)
+        _forget_state(store)
         return 0
     uids = [s['uid'] for s in sites]
     for link in store.links_of(uids):
         store.links.delete(link['uid'])
-    for site in sites:
+    for numero, site in enumerate(sites):
+        prog('remove_sites', numero, len(sites))
         for room in store.rooms_of(site['uid']):
             _remove_room_items(store, room['uid'])
             for rack in store.racks_of(room['uid']):
@@ -148,11 +416,14 @@ def remove(store, *, var_dir: str = '', media_dir: str = '') -> int:
             store.sources.delete(source['uid'])
         store.sites.delete(site['uid'])
         store.forget_scope('site', site['uid'])
+        prog('remove_sites', numero + 1, len(sites))
     for name in _every('org_operator') | _every('org_customer'):
         org = _org_named(store, name)
         if org and not _org_in_use(store, org['uid']):
             store.orgs.delete(org['uid'])
-    _remove_models(store, var_dir, media_dir)
+    prog('remove_catalogue')
+    _remove_catalogue(store, var_dir, media_dir)
+    _forget_state(store)
     return len(sites)
 
 
@@ -161,14 +432,55 @@ def _catalog(store):
     return CatalogStore(store._db)                     # noqa: SLF001
 
 
-def _remove_models(store, var_dir: str, media_dir: str) -> None:
-    """The demo's catalogue models, with their pictures — except one somebody put to use on an
-    item of their own, which is theirs now."""
+def _stores(store) -> tuple:
+    """The catalogue's other stores the demo writes: the templates and the platforms."""
+    from lib.core.dcim.builds import BuildStore         # noqa: PLC0415
+    from lib.core.dcim.platforms import PlatformStore   # noqa: PLC0415
+    return BuildStore(store._db), PlatformStore(store._db)  # noqa: SLF001
+
+
+def _remove_catalogue(store, var_dir: str, media_dir: str) -> None:
+    """What the demo wrote in the catalogue: its templates, its platforms, its models with their
+    pictures and its brand — except what somebody put to use in something of their own, which
+    is theirs now. Bottom-up, so nothing is left pointing at what went."""
+    builds, plats = _stores(store)
+    nombres = {n for k in BUILDS for n in _every('build_' + k)}
+    for b in builds.list():
+        if str(b.get('name') or '') not in nombres:
+            continue
+        if store.items.list('build_uid = ?', (b['uid'],)):
+            continue                                    # somebody made a device from it
+        for cara in ('front_image', 'rear_image'):
+            if b.get(cara) and var_dir:
+                dcim_media.forget(var_dir, b[cara], media_dir)
+        builds.delete(b['uid'])
     cat = _catalog(store)
+    marca = cat.brands.by_slug(_brand_slug(MAKER))
+    en_uso = {str(v.get('platform_uid') or '') for v in builds.list()}
+    for p in plats.list():
+        if p['name'] in PLATFORMS and marca and p.get('brand_uid') == marca['uid'] \
+                and p['uid'] not in en_uso:
+            plats.delete(p['uid'])
+    usados = set()
+    for b in builds.list():
+        usados.add(str(b.get('type_uid') or ''))
+        usados.update(str(x.get('type_uid') or '') for x in builds.parts_of(b['uid']))
     for row in cat.list('source = ?', (SOURCE,)):
-        if not store.items.list('type_uid = ?', (row['uid'],)) \
-                and not store.features.list('type_uid = ?', (row['uid'],)):
-            cat.delete(row['uid'], var_dir, media_dir)
+        uid = row['uid']
+        if uid in usados or any(t.list('type_uid = ?', (uid,)) for t in
+                                (store.items, store.features, store.racks, store.parts)):
+            continue
+        cat.delete(uid, var_dir, media_dir)
+    # And the brand, when nothing names it any more: no model and no platform.
+    marca = cat.brands.by_slug(_brand_slug(MAKER))
+    if marca and not cat.list('brand_uid = ?', (marca['uid'],)) \
+            and not any(p.get('brand_uid') == marca['uid'] for p in plats.list()):
+        cat.brands.delete(marca['uid'])
+
+
+def _brand_slug(name: str) -> str:
+    from lib.core.dcim.brands import slug_of           # noqa: PLC0415
+    return slug_of(name)
 
 
 def _remove_rack(store, rack: dict) -> None:
@@ -227,10 +539,25 @@ class _Builder:
         self.serial = 0
         self.outlet: dict = {}
         self.models: dict = {}
+        #: The power cord each demo model takes (`demo_faces.CORD`), by model key.
+        self.cords: dict = {}
+        #: The demo's templates by model key, and the parts each one stamps on a device.
+        self.builds: dict = {}
+        self.stamped: dict = {}
+        #: Where the build is (`Progress`), or None.
+        self.progress = None
 
     # The small writers -------------------------------------------------------------------
 
     def new(self, table: str, data: dict) -> str:
+        if table == 'racks' and not data.get('type_uid'):
+            # Every cabinet of the demo is one of its catalogue's, by its size.
+            clave = _RACK_MODELS.get((int(data.get('u_height') or 42),
+                                      int(data.get('width_mm') or 600),
+                                      int(data.get('depth_mm') or 1000)))
+            if not clave or not self.models.get(clave):
+                raise DemoError('rack %r has no demo cabinet model' % data.get('name'))
+            data = dict(data, type_uid=self.models[clave])
         return getattr(self.s, table).create(data, actor=self.actor)
 
     def next_serial(self, prefix: str) -> str:
@@ -246,7 +573,12 @@ class _Builder:
                                  'description': self.w[key + '_desc']})
 
     def item(self, rack: str, label: str, role: str, u: int = 0, h: int = 1, **extra) -> str:
-        model = self.models.get(extra.pop('model', ''), '')
+        clave = extra.pop('model', '') or self._default_model(role, label, extra)
+        model = self.models.get(clave, '')
+        # From its template, as the panel creates one: the template's parts copied to it.
+        plantilla = self.builds.get(clave, '') if extra.pop('build', True) else ''
+        if plantilla:
+            extra.setdefault('build_uid', plantilla)
         data = {'rack_uid': rack, 'label': label, 'role': role, 'u_start': u, 'u_height': h,
                 'face': extra.pop('face', 'full'), 'placement': extra.pop('placement', 'u')}
         if model:
@@ -261,7 +593,38 @@ class _Builder:
         if role not in ('blank', 'patch_panel', 'fiber_panel', 'shelf') \
                 and 'serial' not in data:
             data['serial'] = self.next_serial('DM')
-        return self.new('items', data)
+        uid = self.new('items', data)
+        for pieza in self.stamped.get(clave, ()) if plantilla else ():
+            self.new('parts', dict(pieza, item_uid=uid))
+        return uid
+
+    def _default_model(self, role: str, label: str, extra: dict) -> str:
+        """The demo model of what is placed without saying one: a blanking panel or a cable
+        manager by its label, a shelf, a strip by where it goes, a UPS."""
+        if role == 'blank':
+            return 'cablemgr' if label == self.w['cable_manager'] else 'blank'
+        if role == 'shelf':
+            return 'shelf'
+        if role == 'pdu':
+            return 'pdu0u16' if extra.get('placement') == 'side' else 'pdu1u'
+        if role == 'ups':
+            return 'ups1k5'
+        return ''
+
+    def outlets_of(self, key: str) -> int:
+        """How many outlets a strip model has: a PDU row says as many as its strip."""
+        return sum((demo_faces.ports_of(key)[0].get('power-outlets') or {}).values())
+
+    def fit(self, item: str, key: str, slots: list, kind: str = '') -> None:
+        """Fit *slots* of an item with one model of the catalogue, as one part row: its
+        brand, model and size copied from the model, as the panel does."""
+        self.new('parts', self.part_row(key, slots, kind, item_uid=item))
+
+    def part_row(self, key: str, slots: list, kind: str = '', **extra) -> dict:
+        nombre, clase, tam = _part_of(key)
+        return dict({'kind': kind or clase, 'slot': ', '.join(slots), 'qty': len(slots),
+                     'type_uid': self.models.get(key, ''), 'brand': MAKER, 'model': nombre,
+                     'size': tam, 'kit_qty': 1}, **extra)
 
     def pdus(self, rack: str, name: str, sources: tuple, capacity: int = 7400,
              where: tuple = None) -> tuple:
@@ -273,16 +636,19 @@ class _Builder:
         is ``{'u': n, 'face': 'rear'}`` and takes its U like any item, with the outlets of a 1U
         strip."""
         out = []
+        # The strip of the feed it takes: a 16 A one, a 32 A one, or three-phase for the racks
+        # that draw more than one phase gives.
+        vertical = 'pdu0u3p' if capacity > 7400 else 'pdu0u32' if capacity > 3700 else 'pdu0u16'
         for (feed, src), sitio in zip(zip(('a', 'b'), sources), where or PDU_SPLIT):
             label = 'PDU-%s-%s' % (name, feed.upper())
             sitio = dict(sitio)
             if 'u' in sitio:
-                item = self.item(rack, label, 'pdu', sitio.pop('u'), 1,
+                item = self.item(rack, label, 'pdu', sitio.pop('u'), 1, model='pdu1u',
                                  face=sitio.pop('face', 'rear'), depth_mm=200, **sitio)
-                tomas = 12
+                tomas = self.outlets_of('pdu1u')
             else:
-                item = self.item(rack, label, 'pdu', placement='side', **sitio)
-                tomas = 24
+                item = self.item(rack, label, 'pdu', placement='side', model=vertical, **sitio)
+                tomas = self.outlets_of(vertical)
             out.append(self.new('pdus', {'rack_uid': rack,
                                          'name': self.w['pdu_pair'] % (name, feed.upper()),
                                          'feed': feed, 'outlets': tomas, 'capacity_w': capacity,
@@ -291,9 +657,12 @@ class _Builder:
 
     def feed(self, item: str, pdu: str, watts: int, label: str = '') -> None:
         self.outlet[pdu] = self.outlet.get(pdu, 0) + 1
+        # The cord its inlet takes: a C20 supply is fed by a C19 cord, the rest by a C13.
+        tipo = str((self.s.items.get(item) or {}).get('type_uid') or '')
+        clave = next((k for k, uid in self.models.items() if uid and uid == tipo), '')
         self.new('feeds', {'item_uid': item, 'pdu_uid': pdu, 'outlet': self.outlet[pdu],
-                           'watts_said': watts, 'category': 'c13-c14', 'length_mm': 1500,
-                           'label': label})
+                           'watts_said': watts, 'category': self.cords.get(clave, 'c13-c14'),
+                           'length_mm': 1500, 'label': label})
 
     def tidy_outlets(self, rack: str) -> None:
         """Each PDU's outlets in the order of the U they feed: on a vertical strip, the cord
@@ -352,27 +721,120 @@ class _Builder:
                                      'qty': qty, 'notes': notes})
 
     def load_models(self) -> None:
-        """The demo's own catalogue models, with their front and rear pictures
-        (`data/demo/faces/`, see `demo_faces`): reused if they are there, made if not."""
+        """The demo's own catalogue models, complete, in every tree: the cabinets, the devices
+        —with the strips, the UPS, the blanking panels and the room's devices—, the modules
+        that go in their bays and the components that go inside. Their pictures —front, rear
+        and the views of the inside (`data/demo/faces/`, see `demo_faces`)—, their ports by
+        name and type and each one placed on its face, their bays, their size, weight, power
+        and the dates of their life. Reused if they are there, made if not."""
         cat = _catalog(self.s)
         have = {r['model']: r['uid'] for r in cat.list('source = ?', (SOURCE,))}
-        for key, (name, _role, u, full) in demo_faces.MODELS.items():
-            if name in have:
-                self.models[key] = have[name]
+        n, total = 0, len(demo_faces.every())
+        for arbol, claves in demo_faces.TREES:
+            for key in claves:
+                self._load_model(cat, have, arbol, key)
+                n += 1
+                if self.progress is not None:
+                    self.progress('models', n, total)
+        # One instant for all of them: the library tells its imports apart by source and
+        # instant, and fifty-eight models written across two seconds read as two imports.
+        filas = cat.list('source = ?', (SOURCE,))
+        if filas:
+            primero = min(str(r.get('imported_at') or '') for r in filas)
+            cat._db.execute(f'UPDATE {cat._sql_table} SET imported_at = ? '   # noqa: SLF001
+                            'WHERE source = ? AND imported_at <> ?', (primero, SOURCE, primero))
+            cat._db.commit()                                                 # noqa: SLF001
+
+    def _load_model(self, cat, have: dict, arbol: str, key: str) -> None:
+        name = demo_faces.name_of(key)
+        spec = demo_faces.SPECS.get(key) or {}
+        if arbol == 'device-types':
+            self.cords[key] = demo_faces.CORD.get(demo_faces.inlet_of(key), 'c13-c14')
+        if name in have:
+            self.models[key] = have[name]
+            return
+        cuentas, lista, sitio = demo_faces.ports_of(key)
+        row = {'manufacturer': MAKER, 'model': name, 'tree': arbol, 'ports': cuentas,
+               'port_list': lista, 'airflow': _AIRFLOW.get(key, ''),
+               'part_number': spec.get('part_number', ''),
+               'is_powered': spec.get('is_powered', 1),
+               'power_type': spec.get('power_type', ''), 'size': spec.get('size', ''),
+               'description': self.w.get('model_desc_' + key, ''),
+               'extra': dict(spec.get('extra') or {})}
+        if arbol == 'device-types':
+            _n, role, u, full = demo_faces.MODELS[key]
+            row.update(u_tenths=u * 10, full_depth=1 if full else 0, kind=role)
+        elif arbol == 'rack-types':
+            _n, u, _w, _d, _h, forma = demo_faces.RACKS[key]
+            row.update(u_tenths=u * 10, full_depth=1, is_powered=0)
+            row['extra']['form_factor'] = forma
+        elif arbol == 'module-types':
+            row.update(u_tenths=0, full_depth=0, kind=demo_faces.MODULES[key][1])
+        else:
+            row.update(u_tenths=0, full_depth=0, is_powered=0,
+                       kind=demo_faces.COMPONENTS[key][1])
+        for cara, lado in (('front_image', 'front'), ('rear_image', 'rear')):
+            svg = demo_faces.face(key, lado)
+            if svg:
+                row[cara] = self.plan(svg)
+        self.models[key] = cat.create(row, SOURCE, actor=self.actor)
+        if not self.models[key]:
+            return
+        # The inside —the board, the controllers, the open drawer— before anything is placed:
+        # a view's bays are placed on it, and a face that does not exist takes no positions.
+        vistas = []
+        for vid, clave, _file in demo_faces.views_of(key):
+            svg = demo_faces.view(key, vid)
+            imagen = self.plan(svg) if svg else ''
+            vistas.append({'id': vid, 'name': self.w.get(clave, clave), 'image': imagen})
+        if vistas:
+            cat.set_views(self.models[key], vistas, actor=self.actor)
+        # Its ports and bays, already placed: the faces are drawn with them, so where each
+        # socket is is known, and in the rack each cable leaves its own.
+        if sitio:
+            cat.set_port_map(self.models[key], sitio, actor=self.actor)
+
+    def load_builds(self, lang: str = '') -> None:
+        """The platforms the demo's devices run and its templates («Plantillas»): for each of
+        its devices with a system, the model, the system and what it has fitted, written once.
+        A device of the demo is then created from its template (`item`), as the panel does.
+        Reused if they are there, made if not."""
+        builds, plats = _stores(self.s)
+        cat = _catalog(self.s)
+        marca = cat.brands.ensure(MAKER, actor=self.actor)
+        sistemas = {}
+        for nombre, (clase, familia, version, vida) in PLATFORMS.items():
+            ya = plats.find(nombre)
+            sistemas[nombre] = ya['uid'] if ya else plats.create(
+                {'name': nombre, 'kind': clase, 'family': familia, 'version': version,
+                 'brand_uid': marca, 'extra': dict(vida)}, actor=self.actor)
+        sistemas.update(_real_platforms(self.s, plats, cat, lang, self.actor))
+        for key, (sistema, piezas) in BUILDS.items():
+            self.stamped[key] = [self.part_row(k, bahias) for k, bahias in piezas]
+            nombre = self.w['build_' + key]
+            ya = builds.by_name(nombre)
+            if ya:
+                self.builds[key] = ya['uid']
                 continue
-            cuentas, lista, sitio = demo_faces.ports_of(key)
-            row = {'manufacturer': MAKER, 'model': name, 'u_tenths': u * 10,
-                   'full_depth': 1 if full else 0, 'ports': cuentas, 'port_list': lista,
-                   'airflow': _AIRFLOW.get(key, '')}
-            for cara, lado in (('front_image', 'front'), ('rear_image', 'rear')):
-                svg = demo_faces.face(key, lado)
-                if svg:
-                    row[cara] = self.plan(svg)
-            self.models[key] = cat.create(row, SOURCE, actor=self.actor)
-            # Sus puertos, ya situados: las caras se dibujan aquí, así que se sabe dónde está
-            # cada boca, y en el armario cada cable sale de la suya.
-            if sitio and self.models[key]:
-                cat.set_port_map(self.models[key], sitio, actor=self.actor)
+            modelo = cat.get(self.models.get(key, '')) or {}
+            bahias = {p['name'] for p in (modelo.get('port_list') or {}).get('module-bays', ())}
+            for k, lista in piezas:
+                fuera = [x for x in lista if x not in bahias]
+                if fuera:
+                    raise DemoError('template %s: %s are not bays of its model' % (key, fuera))
+            fila = {'name': nombre, 'type_uid': modelo.get('uid', ''),
+                    'role': demo_faces.MODELS[key][1], 'description': self.w['build_desc'],
+                    'notes': self.w['build_notes'], 'valid_from': '2025-01-01',
+                    'platform_uid': sistemas.get(sistema, '')}
+            for campo in ('manufacturer', 'model', 'full_depth', 'airflow', 'power_type',
+                          'ports', 'port_list', 'extra', 'u_tenths'):
+                fila[campo] = modelo.get(campo)
+            if self.var_dir or self.media_dir:
+                fila.update(cat.copy_images(modelo, self.var_dir, self.media_dir))
+            uid = builds.create(fila, actor=self.actor)
+            self.builds[key] = uid
+            for pieza in self.stamped[key]:
+                builds.part_add(uid, pieza, actor=self.actor)
 
     def load_access_models(self, lang: str = '', images: bool = False) -> None:
         """The access control models: not the demo's own but the GENERAL catalogue's —the
@@ -410,22 +872,119 @@ class _Builder:
         return '' if err else name
 
 
+def _part_of(key: str) -> tuple:
+    """``(model, part kind, size)`` of a module or a component of the demo."""
+    if key in demo_faces.MODULES:
+        nombre, _clase, pieza, tam = demo_faces.MODULES[key]
+        return nombre, pieza, tam
+    nombre, clase, tam = demo_faces.COMPONENTS[key]
+    return nombre, clase, tam
+
+
+def _real_platforms(store, plats, cat, lang: str, actor: str) -> dict:
+    """``{name: uid}`` of `REAL_PLATFORMS`, from the general catalogue's basics, with their
+    brand and their dates: brought in if missing, left as they are if there."""
+    from lib.core.dcim import basics as dcim_basics     # noqa: PLC0415
+    fuera = {}
+    filas = {f['name']: f for f in dcim_basics.platforms(lang)}
+    for nombre in REAL_PLATFORMS:
+        ya = plats.find(nombre)
+        if ya:
+            fuera[nombre] = ya['uid']
+            continue
+        f = filas.get(nombre) or {'name': nombre}
+        marca = cat.brands.ensure(str(f['brand']), actor=actor) if f.get('brand') else ''
+        fuera[nombre] = plats.create({'name': nombre, 'kind': f.get('kind') or 'os',
+                                      'family': f.get('family') or '',
+                                      'notes': f.get('notes') or '', 'brand_uid': marca,
+                                      'extra': dict(f.get('extra') or {})}, actor=actor)
+    return fuera
+
+
+def _optics(b: _Builder, sites: list) -> None:
+    """The optics in the cages the demo's fibre reaches: for every fibre between two of its
+    devices, a short-reach SFP+ at each end on multimode, a long-reach one on single-mode, in
+    the port it goes into — not in the cages nobody cabled. A fibre panel takes the fibre
+    itself, and a direct-attach cable carries its own ends."""
+    items = {}
+    for s in sites:
+        for room in b.s.rooms_of(s):
+            for rack in b.s.racks_of(room['uid']):
+                for it in b.s.items_of(rack['uid']):
+                    items[it['uid']] = it
+    clave_de = {uid: k for k, uid in b.models.items() if uid}
+    jaulas = {}
+    for k in ('tor', 'access', 'core', 'router', 'cpe', 'firewall', 'storage'):
+        jaulas[k] = {p['name'] for p in demo_faces.ports_of(k)[1].get('interfaces', ())
+                     if p['type'] in ('10gbase-x-sfpp', '1000base-x-sfp')}
+    puestos: dict = {}
+    for c in b.s.cables_of(list(items)):
+        optica = _OPTIC.get(str(c.get('category') or ''))
+        if c.get('kind') != 'fiber' or not optica:
+            continue
+        for lado in ('a', 'b'):
+            it = items.get(c[lado + '_item'])
+            k = clave_de.get(str((it or {}).get('type_uid') or ''))
+            if it and c[lado + '_port'] in jaulas.get(k, ()):
+                puestos.setdefault((it['uid'], optica), []).append(c[lado + '_port'])
+    for (item, optica), bocas in sorted(puestos.items()):
+        b.fit(item, optica, sorted(set(bocas)))
+
+
 def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
           area_word: str = '', lang: str = '', replace: bool = False,
-          images: bool = False) -> dict:
-    """Write the demo in *lang*. Refuses when it exists, unless *replace* says to rebuild it.
+          images: bool = False, progress=None, app=None) -> dict:
+    """Write the demo in *lang*. Refuses when it exists, unless *replace* says to rebuild it
+    (which is how an outdated demo is updated: removed, then written again).
 
-    Returns ``{'site': uid, 'site_dr': uid, 'site_tx': uid, 'site_pr': uid}`` (`UID_KEYS`)
-    plus what was written, counted.
+    Returns ``{'site': uid, 'site_dr': uid, …}`` (`UID_KEYS`) plus what was written, counted.
+    *progress* receives each step as it starts and advances (`Progress`); the parts other
+    modules registered (`register_part`) are installed after the inventory and report their own
+    steps. **All or nothing**: if any step fails, what was written so far is removed and the
+    error is raised again with ``demo_step``, the step it failed in. The version installed is
+    recorded at the end (`state`).
     """
-    if find(store):
-        if not replace:
-            raise DemoError('the demo site already exists')
-        remove(store, var_dir=var_dir, media_dir=media_dir)
     w = texts(lang)
+    pasos = list(BUILD_STEPS) + [k for p in DEMO_PARTS for k in p.steps] + ['done']
+    existe = bool(find(store))
+    if existe and not replace:
+        raise DemoError('the demo site already exists')
+    prog = Progress(progress, w, (list(REMOVE_STEPS) if existe else []) + pasos)
+    if existe:
+        remove(store, var_dir=var_dir, media_dir=media_dir, progress=prog, app=app)
+    try:
+        made, creado = _build(store, prog, w, actor=actor, var_dir=var_dir,
+                              media_dir=media_dir, area_word=area_word, lang=lang, images=images)
+        ctx = DemoContext(store, app=app, actor=actor, lang=lang, words=w, var_dir=var_dir,
+                          media_dir=media_dir, created=creado)
+        for parte in DEMO_PARTS:
+            parte.install(ctx, _part_progress(prog))
+        _record(store, actor, lang)
+    except Exception as exc:                    # pylint: disable=broad-except
+        paso = prog.key
+        try:
+            remove(store, var_dir=var_dir, media_dir=media_dir, app=app)
+        except Exception:                       # pylint: disable=broad-except
+            pass                                # the error to report is the first one
+        try:
+            exc.demo_step = paso
+        except AttributeError:                  # pragma: no cover - builtins without a dict
+            pass
+        raise
+    prog('done')
+    return made
+
+
+def _build(store, prog, w, *, actor, var_dir, media_dir, area_word, lang, images) -> tuple:
+    """The inventory of the demo, reported step by step. ``(result, created)``."""
     b = _Builder(store, actor, var_dir, media_dir, area_word or 'area', w)
+    b.progress = prog
+    prog('models', 0, len(demo_faces.every()))
     b.load_models()
+    prog('builds')
+    b.load_builds(lang)
     b.load_access_models(lang, images)
+    prog('orgs')
     operator = b.org('org_operator')
     customer = b.org('org_customer')
 
@@ -451,18 +1010,29 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
         'name': w['site_tw'], 'address': w['site_tw_address'], 'lat': 25.0330, 'lon': 121.5654,
         'timezone': 'Asia/Taipei', 'operator_uid': operator, 'description': w['site_tw_desc']})
     sites = [site, site_dr, site_tx, site_pr, site_za, site_tw]
+    prog('sites', len(sites), len(sites))
 
+    prog('power')
     src = _power_chain(b, site)
+    prog('floors', 0, len(_FLOORS))
     floors = _floors(b, site)
+    prog('floors', len(floors), len(_FLOORS))
     net = {}
-    _basement(b, floors['floor_basement'])
-    _ground(b, site, floors['floor_ground'], src, net)
-    _first(b, floors['floor_first'], src, net, customer)
-    _second(b, site, floors['floor_second'], src, net)
-    _third(b, site, floors['floor_third'], src, net)
+    for n, paso in enumerate((
+            lambda: _basement(b, floors['floor_basement']),
+            lambda: _ground(b, site, floors['floor_ground'], src, net),
+            lambda: _first(b, floors['floor_first'], src, net, customer),
+            lambda: _second(b, site, floors['floor_second'], src, net),
+            lambda: _third(b, site, floors['floor_third'], src, net))):
+        prog('main', n, 5)
+        paso()
+    prog('branches', 0, 5)
     _dr(b, site, site_dr, net)
+    prog('branches', 1, 5)
     _americas(b, site, site_tx, site_pr, net)
+    prog('branches', 3, 5)
     _far(b, site, site_tx, site_za, site_tw, net)
+    prog('branches', 5, 5)
     _common(b, floors)
     # El cableado estructurado de toda la oficina: los puestos, sus rosetas, el cable horizontal,
     # las subidas, el anillo de fibra (`demo_cabling`). Antes de ordenar
@@ -470,18 +1040,36 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     from lib.core.dcim import demo_cabling                 # noqa: PLC0415
     # Y las fuentes: las tomas de corriente de los puestos y las salas cuelgan de ellas.
     net['sources'] = src
+    prog('cabling')
     demo_cabling.build(b, site, floors, net)
-    for room in [r for s in sites for r in store.rooms_of(s)]:
-        for rack in store.racks_of(room['uid']):
-            b.tidy_outlets(rack['uid'])
+    todos = [rack for room in [r for s in sites for r in store.rooms_of(s)]
+             for rack in store.racks_of(room['uid'])]
+    for n, rack in enumerate(todos):
+        if n % 5 == 0:
+            prog('outlets', n, len(todos))
+        b.tidy_outlets(rack['uid'])
+    prog('optics')
+    _optics(b, sites)
+    prog('states')
     _states(b, site)
     _access(b, floors)
     _safety(b, floors)
     _place_sources(b, site)
     _room_states(b, site)
-    return {'site': site, 'site_dr': site_dr, 'site_tx': site_tx, 'site_pr': site_pr,
+    made = {'site': site, 'site_dr': site_dr, 'site_tx': site_tx, 'site_pr': site_pr,
             'site_za': site_za, 'site_tw': site_tw,
             'sites': len(sites), 'floors': len(floors), **_counts(store, sites)}
+    items, racks = {}, {}
+    for s_uid in sites:
+        for room in store.rooms_of(s_uid):
+            for rack in store.racks_of(room['uid']):
+                racks.setdefault(rack['name'], []).append(rack['uid'])
+                items.update({i['label']: i['uid'] for i in store.items_of(rack['uid'])})
+            items.update({i['label']: i['uid'] for i in store.items_in_room(room['uid'])})
+    creado = {'sites': {k: made[k] for k in UID_KEYS}, 'models': dict(b.models),
+              'orgs': {'operator': operator, 'customer': customer},
+              'items': items, 'racks': racks}
+    return made, creado
 
 
 def _counts(store, site_uids: list) -> dict:
@@ -804,11 +1392,12 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     rack = b.new('racks', {'room_uid': com, 'name': 'COM-01', 'u_height': 42, 'width_mm': 800,
                            'depth_mm': 1000, 'pos_x': 800, 'pos_y': 800, 'rotation': 180,
                            'access': 'front,rear,right', 'description': w['rack_com_desc']})
-    ups_item = b.item(rack, w['ups_com_item'], 'ups', placement='near')
+    ups_item = b.item(rack, w['ups_com_item'], 'ups', placement='near', model='ups3k')
     ups = b.new('sources', {'site_uid': site, 'name': w['src_ups_com'], 'kind': 'ups',
                             'upstream_uid': src['cgbt'], 'capacity_w': 2700, 'autonomy_min': 25,
                             'item_uid': ups_item})
-    pdu = b.new('pdus', {'rack_uid': rack, 'name': w['pdu_com'], 'feed': 'a', 'outlets': 12,
+    pdu = b.new('pdus', {'rack_uid': rack, 'name': w['pdu_com'], 'feed': 'a',
+                         'outlets': b.outlets_of('pdu0u16'),
                          'capacity_w': 2700, 'source_uid': ups,
                          'item_uid': b.item(rack, 'PDU-COM', 'pdu', placement='side')})
     b.item(rack, w['fiber_operators'], 'fiber_panel', 42, face='front', model='fiber')
@@ -879,7 +1468,8 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
                            'width_mm': 600, 'depth_mm': 450,
                            'pos_x': mx + mw - 1100, 'pos_y': my - _INNER / 2 - 450,
                            'rotation': 0, 'base_mm': 2250, 'access': 'front'})
-    hall_pdu = b.new('pdus', {'rack_uid': hall, 'name': w['pdu_hall'], 'feed': 'a', 'outlets': 8,
+    hall_pdu = b.new('pdus', {'rack_uid': hall, 'name': w['pdu_hall'], 'feed': 'a',
+                              'outlets': b.outlets_of('pdu1u'),
                               'capacity_w': 3600, 'source_uid': src['cgbt'],
                               # Its only door is the front, so its strip is plugged from there.
                               'item_uid': b.item(hall, 'PDU-P0', 'pdu', 1, face='front',
@@ -888,7 +1478,9 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     hall_sw = b.item(hall, 'SW-P0', 'switch', 11, model='access')
     b.feed(hall_sw, hall_pdu, 150)
     b.cable(hall_sw, 'Gi1/0/23', lab_sw, 'Gi1/0/2', color='green', length=12000)
-    b.cable(hall_sw, 'Te1/1/1', sw, 'Gi1/0/24', kind='fiber', category='om4', color='cyan',
+    # Fibre into a fibre port: the communications switch's second SFP+ (its first goes up
+    # to the core). It went into its copper port 24.
+    b.cable(hall_sw, 'Te1/1/1', sw, 'Te1/1/2', kind='fiber', category='om4', color='cyan',
             length=15000)
     net['hall_sw'] = hall_sw
     x, y, rot = _on_wall(_W - _OUTER, _D - _OUTER, 'right', 12500, 900, 400, _OUTER, _OUTER)
@@ -969,9 +1561,6 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
             b.dual(it, role, pdus)
         b.cable(rtr, 'Gi0/1', fw, 'port1', color='red', length=1000)
         b.cable(fw, 'port2', core, 'Gi1/0/1', color='red', length=1000)
-        b.new('parts', {'item_uid': core, 'kind': 'psu', 'model': 'PWR-C1-715WAC', 'qty': 2})
-        b.new('parts', {'item_uid': core, 'kind': 'transceiver', 'model': 'SFP-10G-SR',
-                        'qty': 16, 'description': w['core_uplinks']})
         cores.append((core, rtr))
     b.cable(cores[0][0], 'Te1/0/47', cores[1][0], 'Te1/0/47', kind='dac', category='dac-passive',
             color='black', length=1000, label='STACK')
@@ -1000,7 +1589,7 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
             pdus = b.pdus(rack, name, (src['a'], src['b']), capacity=3700 if hot else 7400)
             _compute_rack(b, rack, name, many, pdus, [c for c, _r in cores], hot,
                           storage=i == 2, halves=i == 4, single=letter == 'A' and i == 1,
-                          console=letter == 'B', parts=letter == 'A' and i == 0)
+                          console=letter == 'B')
 
     b.feature(cpd, 'aisle', w['cpd_aisle'], 1500, 2700, 4800, 1200)
     b.feature(cpd, 'tray', w['cpd_tray_a'], 1500, 1500, 4800, 300)
@@ -1043,8 +1632,8 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
 
 
 def _compute_rack(b: _Builder, rack: str, name: str, many: int, pdus: tuple, cores: list,
-                  hot: bool, *, storage: bool, halves: bool, single: bool, console: bool,
-                  parts: bool) -> None:
+                  hot: bool, *, storage: bool, halves: bool, single: bool,
+                  console: bool) -> None:
     """A row rack: patch panel and top-of-rack switch at the top, servers from the bottom."""
     w = b.w
     b.item(rack, w['patch'] % name, 'patch_panel', 42, face='front', model='patch')
@@ -1073,12 +1662,6 @@ def _compute_rack(b: _Builder, rack: str, name: str, many: int, pdus: tuple, cor
             b.dual(srv, 'server', pdus, watts=1200 if hot else 0)
         port += 1
         b.cable(srv, 'eth0', tor, 'Gi1/0/%d' % port, color='blue', length=2000)
-        if parts and k < 3:
-            b.new('parts', {'item_uid': srv, 'kind': 'memory', 'size': '32 GB', 'qty': 8,
-                            'brand': 'Demo', 'model': 'DDR5-4800 RDIMM'})
-            b.new('parts', {'item_uid': srv, 'kind': 'ssd', 'size': '1.92 TB', 'qty': 4,
-                            'model': 'NVMe U.2'})
-            b.new('parts', {'item_uid': srv, 'kind': 'psu', 'size': '800 W', 'qty': 2})
     if storage:
         st = b.item(rack, w['storage'], 'storage', 30, 4, depth_mm=900, model='storage')
         b.dual(st, 'storage', pdus)
@@ -1208,12 +1791,13 @@ def _idf(b: _Builder, site: str, floor: dict, key: str, tag: str, panel: str, de
                            'width_mm': 800, 'depth_mm': 1000, 'pos_x': 500, 'pos_y': 1200,
                            'rotation': 0, 'access': 'front,rear,left',
                            'description': w['rack_idf_desc']})
-    ups_item = b.item(rack, w['ups_rack'] % tag, 'ups', placement='near')
+    ups_item = b.item(rack, w['ups_rack'] % tag, 'ups', placement='near', model='ups1k5')
     ups = b.new('sources', {'site_uid': site, 'name': w['src_ups_idf'] % tag, 'kind': 'ups',
                             'upstream_uid': panel, 'capacity_w': 1350, 'autonomy_min': 30,
                             'item_uid': ups_item})
     pdu = b.new('pdus', {'rack_uid': rack, 'name': w['pdu_single'] % tag, 'feed': 'a',
-                         'outlets': 12, 'capacity_w': 1350, 'source_uid': ups,
+                         'outlets': b.outlets_of('pdu0u16'), 'capacity_w': 1350,
+                         'source_uid': ups,
                          'item_uid': b.item(rack, 'PDU-%s' % tag, 'pdu', placement='side')})
     fibra = b.item(rack, w['fiber_trunk'], 'fiber_panel', 42, face='front', model='fiber')
     # Los paneles de los puestos y sus switches de acceso, y sus subidas al núcleo por la fibra,
@@ -1277,7 +1861,7 @@ def _third(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
                                      'width_mm': 600, 'depth_mm': 1000, 'pos_x': 1200 + i * 700,
                                      'pos_y': 1300, 'rotation': 0, 'access': 'front,rear',
                                      'description': w['rack_srv_desc']}))
-    ups_item = b.item(racks[3], w['ups_rack'] % 'SRV', 'ups', placement='near')
+    ups_item = b.item(racks[3], w['ups_srv_item'], 'ups', placement='near', model='ups6k')
     ups = b.new('sources', {'site_uid': site, 'name': w['src_ups_srv'], 'kind': 'ups',
                             'upstream_uid': src['p3'], 'capacity_w': 6000, 'autonomy_min': 15,
                             'item_uid': ups_item})
@@ -1690,9 +2274,18 @@ def _branch(b: _Builder, site: str, tag: str, ups_name: str,
                          else ({'u': 5, 'face': 'rear'}, {'u': 6, 'face': 'rear'})))
     # With their depth, as the rest of the demo: without one the 3D drew them nearly as deep as
     # the rack and the cables behind them had nowhere to be seen.
+    # The office's cabling lands on a patch panel at the top, its leads tidied by a cable
+    # manager; the empty units between the network gear are closed, as in the main site.
+    pp = b.item(rack, w['patch'] % tag, 'patch_panel', 42, face='front', model='patch')
+    b.item(rack, w['cable_manager'], 'blank', 41, face='front')
     rtr = b.item(rack, 'RTR-' + tag, 'router', 40, model='router', depth_mm=450)
     fw = b.item(rack, 'FW-' + tag, 'firewall', 38, model='firewall', depth_mm=450)
     sw = b.item(rack, 'SW-' + tag, 'switch', 36, model='tor', depth_mm=450)
+    for u in (39, 37):
+        b.item(rack, w['blank'], 'blank', u, face='front')
+    for port in range(1, 13):
+        b.cable(pp, str(port), sw, 'Gi1/0/%d' % (port + 12), category='cat6a',
+                color='blue', length=1000, label='%s-%02d' % (tag, port))
     activos = [(rtr, 'router'), (fw, 'firewall'), (sw, 'switch')]
     for it, role in activos:
         b.dual(it, role, pdus)

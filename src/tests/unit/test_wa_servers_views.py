@@ -96,7 +96,8 @@ class TestASummaryIsNotAPage:
     def test_the_factory_knows_what_a_summary_is(self):
         src = _strip_comments(_read(FACTORY))
         assert "const summary = mode === 'summary'" in src
-        assert 'summary ? rows : rows.slice(' in src
+        # A server-paged table's rows are already one page: they are not sliced either.
+        assert '(summary || server) ? rows : rows.slice(' in src
         assert 'spec.cardsBody(pageRows, ctx, rows)' in src
         assert "const pagination = summary ? ''" in src
 

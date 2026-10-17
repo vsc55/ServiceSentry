@@ -74,10 +74,12 @@ class ProbeMonitor(Monitor):
         self.status = ConfigControl(None, {})
 
     def send_message(self, message, status=None, module: str = '', item: str = '',
-                     severity: str = ''):   # noqa: D401 - no-op in a probe
+                     severity: str = '', **_kw):   # noqa: D401 - no-op in a probe
         # Signature must mirror Monitor.send_message (message, status, module, item, severity):
         # ModuleBase.send_message forwards module=/item=/severity=, so a probe of any module
         # that emits an alert (e.g. process via check_status) would otherwise TypeError.
+        # …and whatever it forwards beside them (`kind`, `simulated`): a probe sends nothing,
+        # and the keyword it did not know about was a TypeError raised from inside a check.
         return None
 
     def send_message_end(self):

@@ -12,12 +12,17 @@ A profile is data, and deliberately not code::
 
     {
       "id": "if_generic",
-      "label": {"en_EN": "Network interfaces", "es_ES": "Interfaces de red"},
+      "label": {"i18n": "if_generic/label"},
       "metrics": [
         {"key": "if_in", "walk": "1.3.6.1.2.1.2.2.1.10", "kind": "counter",
          "unit": "B/s", "width": 32, "index_label": "1.3.6.1.2.1.2.2.1.2"}
       ]
     }
+
+**Its words are not in it.** A shipped profile names each text by key —``{"i18n": "<key>"}``,
+resolved in the ``snmp_shipped_profiles`` section of the core lang files (:data:`I18N_SECTION`)—
+so translating one is editing a lang file and nothing else. A profile an installation writes
+carries its own words, as a string or one per language: it is its data.
 
 **Two sources, one catalogue.** The product ships profiles as files (they are reviewed in
 commits and travel with the release), and an installation may add or override its own — the
@@ -37,6 +42,8 @@ from __future__ import annotations
 import json
 import os
 import re
+
+from lib.i18n import is_ref as _is_ref, materialize as _materialize
 
 # Profile and metric ids land in a JSON key, a history field name and a chart label, so they
 # keep the same shape the rest of the product demands of an identifier.
@@ -64,6 +71,10 @@ CHARTS = ('line', 'area', 'value', 'none')
 _DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sources')
 # Where an installation's own profiles live, under the application data directory.
 CUSTOM_SUBDIR = 'snmp_profiles'
+#: The section of the core lang files that words the shipped profiles. A key there is
+#: ``<profile>/label``, ``<profile>/short``, ``<profile>/desc``, ``<profile>/<metric>``,
+#: ``<profile>/<metric>/chart`` or ``<profile>/<metric>/<state value>``.
+I18N_SECTION = 'snmp_shipped_profiles'
 
 
 #: The two halves of a proportion a summary can draw as one figure. Deliberately not open-
@@ -293,6 +304,15 @@ def normalise_metric(raw) -> dict | None:
         sby = str(raw.get('scale_by') or '').strip()
         if sby and _OID_RE.match(sby):
             out['scale_by'] = sby
+        # …and the column that says how many DECIMALS the reading carries, which is the
+        # other way a device sizes a number per row. ENTITY-SENSOR-MIB (RFC 3433) is the
+        # case: a sensor answers an integer and `entPhySensorPrecision` beside it says where
+        # the point goes — 2315 with a precision of 1 is 231.5 V, the current of the same
+        # strip 1 decimal, its power 0 — and one fixed `scale` per metric would be wrong for
+        # every agent that chose differently. The reading is divided by 10 to that power.
+        prec = str(raw.get('precision_by') or '').strip()
+        if prec and _OID_RE.match(prec):
+            out['precision_by'] = prec
         # Which TABLE this column belongs to, for the tables whose rows have no names. Row
         # identity is the row's name, and two nameless tables of one device fall back to their
         # SNMP indices — where storage row 3 and processor row 3 are not the same row and
@@ -709,6 +729,9 @@ def normalise(raw) -> dict | None:
     """
     if not isinstance(raw, dict):
         return None
+    # The words first: a shipped profile names them by key, and so may a file somebody copied
+    # from the shipped folder. A text written in the document is not a key and is kept.
+    raw = _materialize(raw, I18N_SECTION)
     pid = str(raw.get('id') or '').strip().lower()
     if not _ID_RE.match(pid):
         return None
@@ -1084,6 +1107,8 @@ def label_of(obj: dict, lang: str, default_lang: str = 'en_EN') -> str:
     that the device had answered nothing, and the screen said the machine was not responding.
     """
     labels = (obj or {}).get('label') or {}
+    if _is_ref(labels):                 # a raw shipped file: the words are in the lang files
+        labels = _materialize(labels, I18N_SECTION)
     if isinstance(labels, str):
         return labels.strip() or str((obj or {}).get('id') or (obj or {}).get('key') or '')
     if not isinstance(labels, dict):
@@ -1100,6 +1125,8 @@ def short_label_of(obj: dict, lang: str, default_lang: str = 'en_EN') -> str:
     one; the catalogue wants the title.
     """
     labels = (obj or {}).get('short_label') or {}
+    if _is_ref(labels):
+        labels = _materialize(labels, I18N_SECTION)
     if isinstance(labels, str):
         return labels.strip()
     if not isinstance(labels, dict):

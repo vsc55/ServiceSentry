@@ -9,6 +9,8 @@
 {% include "partials/core/_constants.html" %}
 {% include "partials/core/_utils.html" %}
 {% include "partials/core/_toast.html" %}
+{# The side drawer: the summary of one row beside its list (a brand, a library model). #}
+{% include "partials/core/_drawer.html" %}
 {# Dónde cae un punto de la Tierra en un dibujo. Core porque ya lo quieren dos: el mapa
    de sedes del inventario y el widget de sedes del panel de control. #}
 {% include "partials/core/_geo.html" %}
@@ -181,6 +183,8 @@
    drawn on it. #}
 {% include "core/view3d/web/_viewer3d.html" %}
 {% include "core/view3d/web/_viewer3d_tools.html" %}
+{# The clustered layout both maps are drawn with: sites, bands, folding. Pure, before both. #}
+{% include "partials/infra/_netgraph.html" %}
 {% include "partials/infra/_map.html" %}
 {# After _map.html: the link map reads its loader, its cache and its drawing helpers. #}
 {% include "partials/infra/_links.html" %}
@@ -211,6 +215,11 @@
 {% include "partials/dcim/_brands_views.html" %}
 {% include "partials/dcim/_platforms.html" %}
 {% include "partials/dcim/_catalog.html" %}
+{# The library's views, its address and its header; the Models view; its Summary; the drawers. #}
+{% include "partials/dcim/_library.html" %}
+{% include "partials/dcim/_library_models.html" %}
+{% include "partials/dcim/_library_summary.html" %}
+{% include "partials/dcim/_library_drawer.html" %}
 {% include "partials/dcim/_builds.html" %}
 {% include "partials/dcim/_schemas.html" %}
 {% include "partials/dcim/_sources.html" %}

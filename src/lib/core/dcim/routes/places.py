@@ -113,6 +113,25 @@ def _bad_text(wa, field):
 
 def register(app, wa, C):
     """Las rutas de esta área. *C* es lo que comparten todas: los permisos y los ayudantes."""
+    def _rack_type(data: dict) -> None:
+        """Leave in *data* a `type_uid` that is a cabinet of the catalogue, or none at all.
+
+        The generic CRUD writes any column, so without this a rack could say it is a switch,
+        or name a model that does not exist — and no error says so when it is written. Empty
+        is a request to say it is no model, and stays. The same rule as an item's model."""
+        if 'type_uid' not in data:
+            return
+        uid = str(data.get('type_uid') or '').strip()
+        if not uid:
+            data['type_uid'] = ''
+            return
+        cat = getattr(wa, '_dcim_catalog', None)
+        modelo = cat.get(uid) if cat else None
+        if not modelo or str(modelo.get('tree') or '') != 'rack-types':
+            data.pop('type_uid', None)
+        else:
+            data['type_uid'] = uid
+
     @app.route('/api/v1/dcim/orgs', methods=['GET'])
     @C.view_req
     def api_dcim_orgs():
@@ -259,6 +278,8 @@ def register(app, wa, C):
                 return _bad_number(wa, malo)
             if part == 'racks' and group_bad(data):
                 return jsonify({'error': wa._t('dcim_group_bad')}), 400
+            if part == 'racks':
+                _rack_type(data)
             if part == 'racks' and not _rack_row_ok(store, data, data.get('room_uid')):
                 return jsonify({'error': wa._t('dcim_row_other_room')}), 400
             err = C.asset(part, data)
@@ -314,6 +335,8 @@ def register(app, wa, C):
                 return _bad_number(wa, malo)
             if part == 'racks' and group_bad(data):
                 return jsonify({'error': wa._t('dcim_group_bad')}), 400
+            if part == 'racks':
+                _rack_type(data)
             if part == 'racks' and not _rack_row_ok(store, data,
                                                     data.get('room_uid', row.get('room_uid'))):
                 return jsonify({'error': wa._t('dcim_row_other_room')}), 400
@@ -665,6 +688,7 @@ def register(app, wa, C):
                 rack['roll'] = roll['rack'].get(rack['uid']) or {}
                 # How full it is: the 3D can colour a building's racks by occupancy.
                 rack['used_u'] = _used_u(store, rack)
+            C.rack_models(racks)
             seen = dcim_owners.may_see(C.owner_of(store, said, 'room', room['uid']), allowed)
             rooms[room['uid']] = {'racks': racks,
                                   'features': store.features_of(room['uid']) if seen else [],
@@ -1541,6 +1565,14 @@ def register(app, wa, C):
             else:
                 # Within what the rack form accepts: a file is not a way around the check.
                 alto = int(_num(row.get('u_height')) or 42)
+                # Its cabinet model, by the same rule as the form: a cabinet of this catalogue
+                # or none — a uid of another installation's catalogue is counted as lost.
+                modelo = {'type_uid': _txt(row.get('type_uid'))}
+                _rack_type(modelo)
+                if _txt(row.get('type_uid')) and not modelo.get('type_uid'):
+                    _perdido('type_uid')
+                if modelo.get('type_uid'):
+                    sitio['type_uid'] = modelo['type_uid']
                 store.racks.create(dict(sitio, room_uid=uid, name=nombre,
                                         u_height=max(1, min(RACK_U_MAX, alto)),
                                         width_mm=_mm(row.get('width_mm')) or 600,

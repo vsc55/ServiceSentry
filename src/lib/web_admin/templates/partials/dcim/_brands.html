@@ -47,12 +47,11 @@ function _dcBrandsHtml() {
         return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm">
             </div></div>`;
     }
-    // Las otras cuatro vistas, en `_brands_views.html`.
-    if (_dcBrandViewNow() !== 'table') return _dcBrandViewsHtml();
     // Sólo el hueco: lo llena `renderDcBrd`, que es lo que crea `createListTable`. Lo mismo que
     // Plantillas y Equipos — la tabla compartida se dibuja sola y aquí no hay que saber cómo.
-    return `<div class="ss-toolrow mb-2">${_dcBrandSwitchHtml()}</div>
-        <div id="dcbrd-container" class="ss-vfill"></div>`;
+    // Las tres vistas van DENTRO de esa tarjeta (como Usuarios): su selector en la cabecera, a
+    // la izquierda del de columnas, y las otras dos como cuerpo alternativo (`_brands_views.html`).
+    return `<div id="dcbrd-container" class="ss-vfill"></div>`;
 }
 
 /** Llenar el hueco, una vez puesto en el documento. Lo llama el dibujado del Catálogo DESPUÉS
@@ -60,7 +59,7 @@ function _dcBrandsHtml() {
  *  un solo error. La pestaña de las marcas se ve siempre —con o sin permiso de gestión—, así
  *  que mirar `_dcCatTab` es mirar lo que está a la vista. */
 function _dcBrandsMount() {
-    if (_dcCatTab !== 'brands' || _dcBrands === null || _dcBrandViewNow() !== 'table') return;
+    if (_dcCatTab !== 'brands' || _dcBrands === null) return;
     if (typeof renderDcBrd === 'function') renderDcBrd();
 }
 
@@ -75,7 +74,7 @@ const _DCBR_COLS = [
     // Las plataformas también son catálogo de la marca —y hay marcas que sólo hacen eso—, pero
     // no son modelos: en su propia columna, y no sumadas a la otra.
     {id: 'platforms', label: () => t('dcim_cat_tab_platforms'), sortKey: 'platforms',
-     thClass: 'text-end'},
+     thClass: 'text-end pe-4'},
     {id: 'url', label: () => t('dcim_brand_url'), sortKey: 'url'},
     {id: 'support', label: () => t('dcim_brand_support'), sortKey: 'support'},
     {id: 'account', label: () => t('dcim_brand_account'), sortKey: 'account'},
@@ -118,7 +117,7 @@ function _dcbrCell(b, id) {
         return `<td class="text-end ss-tabular">${esc(String(b.models || 0))}</td>`;
     }
     if (id === 'platforms') {
-        return `<td class="text-end ss-tabular">${esc(String(b.platforms || 0))}</td>`;
+        return `<td class="text-end ss-tabular pe-4">${esc(String(b.platforms || 0))}</td>`;
     }
     if (id === 'url') return _dcbrLink(b.url);
     if (id === 'support') return _dcbrLink(b.support_url);
@@ -138,7 +137,11 @@ function _dcbrRowActions(b) {
 
 createListTable({
     key: 'dcbrd', containerId: 'dcbrd-container', tableId: 'dcbrd-table',
-    accent: 'blue', icon: 'bi-tags', title: () => t('dcim_cat_tab_brands'),
+    accent: 'blue', icon: 'bi-tags',
+    // De dónde salen las marcas, como ayuda del título y no como un renglón dentro de la
+    // tarjeta: las demás listas del panel no llevan ese renglón.
+    title: () => `<span title="${escAttr(t('dcim_brand_intro'))}">${
+        esc(t('dcim_cat_tab_brands'))}</span>`,
     columns: _DCBR_COLS, defaultVisible: _DCBR_DEFAULT_COLS,
     persist: true, clearLabelKey: 'dcim_cat_tab_brands',
     prepare: async () => ({d: _dcBrands || {}, puede: _dcimMay('dcim_catalog_manage')}),
@@ -163,15 +166,21 @@ createListTable({
         },
     },
     sortValue: (b, key) => _dcbrSortValue(b, key),
-    rowAttrs: (b) => ` class="ss-rowlink" onclick="_dcBrandGo(${jsStr(b.uid)},${
-        jsStr(b.name || '')})"`,
+    // La fila abre su FICHA a un lado (`_library_drawer.html`): por dónde se pide soporte, con
+    // qué cuenta, sus modelos por forma y sus plataformas — y de ahí, a sus modelos.
+    rowAttrs: (b) => ` class="ss-rowlink" onclick="_dcLibBrandDrawer(${jsStr(b.uid)})"`,
     cell: (b, id) => _dcbrCell(b, id),
     actions: (b) => _dcbrRowActions(b),
     actionsVisible: ctx => ctx.puede,
+    // Las otras dos vistas: un cuerpo de resumen con TODAS las filas que deja el filtro, sin
+    // páginas ni columnas — el selector de columnas sólo tiene sentido sobre la tabla.
+    bodyMode: () => (_dcBrandViewNow() === 'table' ? 'table' : 'summary'),
+    showChooser: mode => mode === 'table',
+    cardsBody: (pagina, ctx, filas) => _dcBrandViewBody(filas),
+    headerLead: ctx => _dcBrandLeadHtml(ctx),
     headerButtons: ctx => (ctx.puede ? `<button class="btn btn-sm btn-primary"
         onclick="_dcBrandEdit(null)"><i class="bi bi-plus-lg me-1"></i>${
         esc(t('dcim_brand_new'))}</button>` : ''),
-    beforeBody: () => `<div class="text-muted ss-fs-2 mb-3">${esc(t('dcim_brand_intro'))}</div>`,
     refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_dcBrandsLoad()"
         title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
         esc(t('refresh'))}</button>`,
@@ -205,7 +214,7 @@ function _dcBrandGo(uid, nombre) {
     _dcCatBrandName = nombre || '';
     _dcCatMaker = '';
     _dcCatOff = 0;
-    _dcCatOpen();
+    _dcLibGo('models');
 }
 
 // ── La ficha ────────────────────────────────────────────────────────────────────────────

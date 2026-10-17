@@ -102,8 +102,17 @@ def register(app, wa):
         devices_svc.enrich_devices(
             devices, devices_svc._device_statuses(wa), bound,
             infra_svc.fleet_identity(wa._read_check_status(), devices, _said_sources(bound)))
-        rows = infra_svc.fleet(_visible(devices, set(wa._get_session_permissions() or [])))
-        return jsonify({'devices': rows, 'summary': infra_svc.summary(rows)})
+        perms = set(wa._get_session_permissions() or [])
+        rows = infra_svc.fleet(_visible(devices, perms))
+        # …and the site each one is in, as the inventory says and as far as this caller may
+        # see it: the list filters by it, and both maps group by it — one answer for both.
+        got = infra_svc.places(wa, perms, [r.get('uid') for r in rows])
+        names = {x['uid']: x['name'] for x in got['sites']}
+        for r in rows:
+            r['site'] = (got['at'].get(r.get('uid')) or {}).get('site', '')
+            r['site_name'] = names.get(r['site'], '')
+        return jsonify({'devices': rows, 'summary': infra_svc.summary(rows),
+                        'sites': got['sites']})
 
     @app.route('/api/v1/infra/devices/<uid>', methods=['GET'])
     @infra_view_req
@@ -291,7 +300,12 @@ def register(app, wa):
         # Armado en `infra.service` y no aquí: la sección de cableado necesita el MISMO
         # mapa para contrastar lo declarado con lo que los dispositivos ven, y dos copias de
         # cómo se arma serían dos pantallas contando cosas distintas de la misma flota.
-        return jsonify(_topology(session.get('lang') or wa._DEFAULT_LANG))
+        # …with where each machine is, which only this route may add: it depends on what the
+        # caller may see of the inventory, and the other reader of `_topology` (the cabling
+        # reconciliation) has no use for it.
+        return jsonify(infra_svc.annotate_places(
+            wa, _topology(session.get('lang') or wa._DEFAULT_LANG),
+            set(wa._get_session_permissions() or [])))
 
     @app.route('/api/v1/infra/map-layout', methods=['GET', 'PUT'])
     @infra_view_req

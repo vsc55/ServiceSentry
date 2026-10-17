@@ -161,6 +161,11 @@ class Debug:
 
     def debug_obj(self, name_module, obj_debug, obj_info="Data Object"):
         """ Print the debug information of an object. """
+        # Asked before formatting: every module calls this at the end of its check with its
+        # whole result, and pretty-printing sixteen thousand SNMP rows to throw the text away
+        # was thirteen seconds of a cycle with the log off.
+        if not self.enabled or self.level > DebugLevel.debug:
+            return
         str_obj = pprint.pformat(obj_debug)
         msg_debug = f"{'*' * 60}\n"
         msg_debug += f"Debug [{name_module}] - {obj_info}:\n"

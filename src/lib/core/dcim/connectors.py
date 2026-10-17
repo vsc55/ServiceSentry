@@ -38,7 +38,7 @@ import json
 import os
 
 from lib.core.dcim import media
-from lib.i18n import DEFAULT_LANG
+from lib.i18n import DEFAULT_LANG, materialize as _materialize
 
 #: El fichero. Al lado del de perfiles y del de básicos, y por la misma razón: es dato, se revisa
 #: en un commit y lo reemplaza cada actualización.
@@ -48,6 +48,12 @@ FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'connect
 #: en las que caben, y se traducen por su clave (`dcim_conn_group_<id>`).
 GROUPS = ('power-in', 'power-out', 'copper', 'fibre', 'wireless', 'console', 'video', 'bay',
           'other')
+
+#: The section of the core lang files that words the shipped document. The file holds
+#: ``{"i18n": "<key>"}`` where a text goes: ``<connector>/name``, ``<connector>/note`` and
+#: ``signal/<signal>``. A version somebody SAVES is theirs and keeps its texts inside: the editor
+#: is handed the document with the words already resolved, so what comes back is literal.
+I18N_SECTION = 'dcim_shipped_connectors'
 
 #: Cómo se llama este documento en `dc_profile`, que guarda documentos por nombre.
 NAME = 'connectors'
@@ -117,7 +123,9 @@ def effective(store=None) -> dict:
         guardado = store.get(NAME)
     except Exception:                           # pylint: disable=broad-except
         return dentro                           # una fila ilegible no es una versión más nueva
-    fuera = (guardado or {}).get('body') or {}
+    # Resolved too: a saved document that kept a reference —pasted from the shipped file—
+    # reads the shipped word rather than the bare key.
+    fuera = _materialize((guardado or {}).get('body') or {}, I18N_SECTION)
     return fuera if int(fuera.get('version') or 0) > int(dentro.get('version') or 0) else dentro
 
 
@@ -140,7 +148,9 @@ def packaged() -> dict:
     if _CACHE is None or firma != _SEEN:
         try:
             with open(FILE, encoding='utf-8') as fh:
-                _CACHE = json.load(fh)
+                # With its words resolved once, here: everything downstream —the readers, the
+                # editor, a save— sees a text per language exactly as the file used to hold it.
+                _CACHE = _materialize(json.load(fh), I18N_SECTION)
         except Exception:                       # pylint: disable=broad-except
             _CACHE = {}
         if not isinstance(_CACHE, dict):
@@ -153,7 +163,8 @@ def _text(v, lang: str = '') -> str:
     """Un texto del fichero, en el idioma que se pida.
 
     Puede venir como cadena —lo que no hace falta traducir, que aquí es casi todo: `USB-C` se
-    llama igual en los dos idiomas— o como ``{'es_ES': …, 'en_EN': …}`` donde sí.
+    llama igual en los dos idiomas— o como un texto por idioma donde sí: el que trae el panel
+    sale de los ficheros de idioma (`I18N_SECTION`), y el que alguien guardó lo lleva dentro.
     """
     if isinstance(v, dict):
         for clave in (str(lang or ''), DEFAULT_LANG):

@@ -59,6 +59,12 @@ _PERDONADAS = {
 }
 
 
+#: Code allowed to WRITE a per-language map, because what it writes is user data or the
+#: resolution of a shipped key (`lib.i18n.materialize`). Empty: both build the map from the lang
+#: files with a comprehension, never from literals. An entry added here says why beside it.
+_MAPAS_PERMITIDOS: frozenset = frozenset()
+
+
 def _ficheros(raiz, ext):
     for aqui, _dirs, ficheros in os.walk(raiz):
         if '__pycache__' in aqui:
@@ -88,10 +94,15 @@ class TestNingunaPalabraDelPanelVivEnElCodigo:
         trae sus textos porque ningún texto del core puede nombrarlo. En el core, eso es un par
         de traducciones fuera del catálogo — y la que se quede vieja no lo va a decir nadie."""
         malos = []
-        for ruta in _ficheros(LIB, '.py'):
+        # The modules too: a watchful's words live in ITS `lang/`, not in a dict in its code
+        # (`snmp/sampler.py` is where one would go). Their tests are not shipped code.
+        rutas = list(_ficheros(LIB, '.py')) + list(_ficheros(os.path.join(SRC, 'watchfuls'), '.py'))
+        for ruta in rutas:
             rel = _rel(ruta)
             if rel.startswith('lib/i18n/'):
                 continue                     # el catálogo, que de eso vive
+            if '/tests/' in rel or '/lang/' in rel or rel in _MAPAS_PERMITIDOS:
+                continue
             try:
                 arbol = ast.parse(io.open(ruta, encoding='utf-8').read())
             except SyntaxError:

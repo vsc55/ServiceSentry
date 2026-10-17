@@ -1,13 +1,7 @@
 {
   "id": "grp_mikrotik",
-  "label": {
-    "en_EN": "MikroTik RouterOS (everything)",
-    "es_ES": "MikroTik RouterOS (todo)"
-  },
-  "description": {
-    "en_EN": "Everything a RouterOS device answers: its own hardware, plus the standard MIBs it serves — system, interfaces, filesystems and memory, and the IP, TCP/UDP and ICMP counters.",
-    "es_ES": "Todo lo que contesta un equipo con RouterOS: su propio hardware, más las MIBs estándar que sirve — sistema, interfaces, sistemas de ficheros y memoria, y los contadores IP, TCP/UDP e ICMP."
-  },
+  "label": {"i18n": "grp_mikrotik/label"},
+  "description": {"i18n": "grp_mikrotik/desc"},
   "includes": [
     "mikrotik_routeros",
     "sys_generic",

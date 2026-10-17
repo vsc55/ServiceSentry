@@ -89,8 +89,11 @@ def _view_specs(page: dict, lang: str) -> list:
         clave = v.get('label_key') or ''
         label = page_label({'label_key': clave}, lang) if clave else (
             texts.get(lang) or texts.get('en_EN') or v['slug'])
+        # `perm` narrows ONE view further than its section (empty: the section's permission is
+        # enough). It travels to the client so the sidebar can hide the entry and the renderer
+        # can fall back to a view the reader may open; the route enforces it as well.
         out.append({'slug': v['slug'], 'icon': v['icon'], 'kind': v['kind'],
-                    'action': v['action'], 'label': label})
+                    'action': v['action'], 'label': label, 'perm': v.get('perm') or ''})
     return out
 
 
@@ -203,6 +206,12 @@ def register(app, wa):
             perms = set(wa._get_session_permissions() or [])
             if spec.get('perm') and spec['perm'] not in perms:
                 return redirect(url_for('dashboard'))
+            # A view that asks for more than its section: without that permission the address
+            # lands on the section itself, which then opens a view the reader may see — the
+            # same answer a stale bookmark gets, rather than a screen that refuses to draw.
+            wanted = next((v for v in (spec.get('views') or ()) if v.get('slug') == view), None)
+            if wanted and wanted.get('perm') and wanted['perm'] not in perms:
+                return redirect(page['url'])
             # A view is a sub-path of its section, not a page: same shell, same pane, same
             # permission — the client reads the slug off the URL and opens that view. An
             # unknown slug is not a 404, it is the section's first view, because a stale

@@ -196,8 +196,13 @@ class DeviceBinding:
         # `auto` asks the DEVICE first, out of what a module has already recorded about it —
         # see `reported_os`. Then the old ladder: this process's platform on a local device, and
         # on a remote one `'auto'`, resolved over SSH by the consumer when needed.
+        #
+        # Asked only when there is something to ask: a device whose OS somebody set has it, and
+        # reading what the fleet said cost a scan of the whole recorded state per check.
+        auto = str(primary.get('os') or 'auto').strip().lower() == 'auto'
         resolved['device_os'] = resolve_os(
-            primary.get('os'), is_remote, reported=self._reported_os(primary.get('uid')))
+            primary.get('os'), is_remote,
+            reported=self._reported_os(primary.get('uid')) if auto else '')
         # The kind ITSELF and not a two-way flag: `device_exec` has three answers to give
         # now (over SSH, here, nowhere), and collapsing them to remote/local is what made a
         # device with no connection run its commands on the panel.

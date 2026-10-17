@@ -1,0 +1,196 @@
+{# ================================================================
+   DCIM — la biblioteca: el Resumen, la vista de entrada.
+
+   Contesta «¿cómo está la biblioteca?» antes de que haya que preguntar nada: cuántos modelos de
+   cada forma, cuántas marcas y cuántas de ellas están de verdad en la instalación, qué
+   plataformas se han quedado sin soporte o lo pierden en menos de seis meses, y cuántos
+   conectores. Debajo, la calidad de los datos —sin imagen frontal, dispositivos sin puertos,
+   marca escrita sin ficha, modelos que nadie ha colocado ni usa en una plantilla, hechos a mano—,
+   lo que caduca, y las importaciones (o, para quien solo lee, las marcas en uso).
+
+   **Cada cifra es una puerta**: abre la lista con su filtro puesto, en una ficha que se quita.
+   Las cuenta el servidor con la MISMA condición que aplica el filtro
+   (`GET /api/v1/dcim/catalog/summary`), así que el número y la lista a la que lleva coinciden.
+   Lo instalado solo lo ve quien puede ver el inventario, y contado sobre lo que puede ver.
+   ================================================================ #}
+
+//: Lo que contestó el resumen, o `null` si hay que pedirlo.
+let _dcLibSum = null;
+//: Si ya hay una petición en vuelo: cada dibujado mientras llega sería otra.
+let _dcLibSumBusy = false;
+
+//: El color de cada forma en la barra y en su leyenda: la paleta de series del panel
+//: (`.ss-series-N`), que se lee igual en los dos temas.
+const _DCLIB_TREE_BG = {'device-types': 'ss-series-1', 'module-types': 'ss-series-2',
+                        'rack-types': 'ss-series-3', 'component-types': 'ss-series-4'};
+
+async function _dcLibSumLoad() {
+    if (_dcLibSumBusy) return;
+    _dcLibSumBusy = true;
+    try {
+        _dcLibSum = await apiGet('/api/v1/dcim/catalog/summary') || {};
+    } finally { _dcLibSumBusy = false; }
+    renderDcim();
+}
+
+function _dcLibSummaryHtml() {
+    if (_dcLibSum === null) {
+        _dcLibSumLoad();
+        return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    const s = _dcLibSum || {};
+    const puede = _dcimMay('dcim_catalog_manage');
+    return `<div class="row g-2">${_dcLibTilesHtml(s)}</div>
+        <div class="row g-2 mt-1">
+            <div class="col-12 col-lg-4">${_dcLibQualityHtml(s)}</div>
+            <div class="col-12 col-lg-4">${_dcLibExpiringHtml(s)}</div>
+            <div class="col-12 col-lg-4">${puede ? _dcLibImportsHtml(s) : _dcLibInUseHtml(s)}</div>
+        </div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_lib_sum_note'))}</div>`;
+}
+
+/** Las cuatro tarjetas de arriba. */
+function _dcLibTilesHtml(s) {
+    const m = s.models || {};
+    const total = Number(m.total || 0);
+    const arboles = (m.trees || []).filter(x => Number(x.count || 0) > 0);
+    const b = s.brands || {};
+    const p = s.platforms || {};
+    const c = s.connectors || {};
+    const tarjeta = (lbl, n, resto) => `<div class="col-6 col-lg-3"><div
+            class="card h-100 ss-tile ss-surface"><div class="card-body py-2 px-3">
+        <div class="ss-tile-lbl">${esc(lbl)}</div>
+        <div class="ss-tile-big ss-tabular">${esc(String(n || 0))}</div>${resto}</div></div></div>`;
+    const barra = total ? `<div class="ss-stackbar my-1" role="img"
+            aria-label="${escAttr(arboles.map(x => `${_dcCatTreeName(x.name)} ${x.count}`)
+                                   .join(', '))}">${arboles.map(x => `<span class="${
+            escAttr(_DCLIB_TREE_BG[x.name] || 'bg-secondary')}" style="width:${
+            (Number(x.count) * 100 / total).toFixed(2)}%"></span>`).join('')}</div>
+        <div class="d-flex flex-wrap gap-2 ss-fs-1">${arboles.map(x => `<a href="#"
+            class="text-body-secondary text-decoration-none"
+            onclick="_dcLibLand('tree',${jsStr(x.name)});return false;"><span
+            class="ss-legend-dot ${escAttr(_DCLIB_TREE_BG[x.name] || 'bg-secondary')}"></span>${
+            esc(String(x.count))} ${esc(_dcCatTreeName(x.name))}</a>`).join('')}</div>` : '';
+    const enUso = (b.in_use === null || b.in_use === undefined) ? ''
+        : `<a href="#" class="ss-fs-2" onclick="_dcLibLandBrands();return false;">${
+              esc(tf('dcim_lib_brands_in_use', b.in_use))}<i class="bi bi-arrow-right ms-1"></i></a>`;
+    // Suaves, no sólidos: dicen un estado, y al lado de la cifra grande no deben gritar más que ella.
+    const soporte = `<div class="d-flex flex-wrap gap-1 mt-1">
+        <button type="button" class="badge border-0 fw-normal bg-danger-subtle text-danger-emphasis"
+            onclick="_dcLibLandPlat('gone')">${esc(tf('dcim_lib_eos_gone_n', p.gone || 0))}</button>
+        <button type="button" class="badge border-0 fw-normal bg-warning-subtle text-warning-emphasis"
+            onclick="_dcLibLandPlat('soon')">${esc(tf('dcim_lib_eos_soon_n', p.soon || 0))}</button>
+        </div>`;
+    const familias = `<a href="#" class="ss-fs-2" onclick="_dcLibGo('connectors');return false;">${
+        esc(tf('dcim_lib_conn_families', c.families || 0))}<i class="bi bi-arrow-right ms-1"></i></a>`;
+    return tarjeta(t('dcim_cat_tab_list'), total, barra)
+        + tarjeta(t('dcim_cat_tab_brands'), b.total, enUso)
+        + tarjeta(t('dcim_cat_tab_platforms'), p.total, soporte)
+        + tarjeta(t('dcim_cat_tab_conns'), c.total, familias);
+}
+
+/** Una tarjeta con su cabecera y una lista de renglones pulsables. */
+function _dcLibCardHtml(titulo, filas, pie) {
+    return `<div class="card h-100 overflow-hidden ss-surface"><div
+            class="ss-card-header fw-semibold ss-fs-3">${esc(titulo)}</div>
+        <div class="list-group list-group-flush ss-list-dashed">${filas || ''}</div>
+        ${pie ? `<div class="card-body py-2">${pie}</div>` : ''}</div>`;
+}
+
+/** Un renglón: lo que es a la izquierda, la cifra (o lo que toque) a la derecha. */
+function _dcLibRow(onclick, izq, der) {
+    return `<button type="button" class="list-group-item list-group-item-action
+            d-flex justify-content-between align-items-center gap-2" onclick="${onclick}">
+        <span>${izq}</span><span class="text-nowrap">${der}</span></button>`;
+}
+
+function _dcLibQualityHtml(s) {
+    const q = s.quality || {};
+    const fila = (que, clave, n) => (n === null || n === undefined) ? ''
+        : _dcLibRow(`_dcLibLand(${jsStr(que)})`, esc(t(clave)),
+                    `<strong class="ss-tabular">${esc(String(n))}</strong>
+                     <i class="bi bi-arrow-right ms-1"></i>`);
+    return _dcLibCardHtml(t('dcim_lib_quality'),
+        fila('img', 'dcim_lib_q_no_image', q.no_image)
+        + fila('ports', 'dcim_lib_q_no_ports', q.no_ports)
+        + fila('brand', 'dcim_lib_q_no_brand', q.no_brand)
+        + fila('unused', 'dcim_lib_q_unused', q.unused)
+        + fila('manual', 'dcim_lib_q_manual', q.manual),
+        `<span class="text-muted ss-fs-1">${esc(t('dcim_lib_quality_note'))}</span>`);
+}
+
+function _dcLibExpiringHtml(s) {
+    const lista = ((s.platforms || {}).expiring) || [];
+    const hoy = String(s.today || ''), pronto = String(s.soon_until || '');
+    const filas = lista.map(p => _dcLibRow(`_dcLibLandPlat(${jsStr(p.state)})`,
+        `${esc(p.name || '')}${Number(p.builds || 0) ? ` <span class="text-muted">· ${
+            esc(tf('dcim_lib_in_builds', p.builds))}</span>` : ''}`,
+        _dcLibEosBadge({extra: {eol: p.eol}}, hoy, pronto))).join('');
+    return _dcLibCardHtml(t('dcim_lib_expiring'), filas,
+        lista.length ? '' : `<span class="text-muted ss-fs-2">${esc(t('dcim_lib_expiring_none'))}</span>`);
+}
+
+function _dcLibImportsHtml(s) {
+    const lista = s.imports || [];
+    const filas = lista.map(i => _dcLibRow(`_dcLibLand('import',${jsStr(i.key)})`,
+        `<span class="ss-tabular">${esc(_dcLibDay(i.at))}</span> · ${esc(_dcCatSrcName(i.source))}`,
+        `<span class="text-muted ss-tabular">+${esc(String(i.count || 0))}</span>`)).join('');
+    const pie = `<div class="d-flex flex-wrap gap-1">${lista.length ? `<button
+            class="btn btn-sm btn-secondary"
+            onclick="_dcLibLand('import',${jsStr(lista[0].key)})">${
+            esc(t('dcim_lib_see_last_import'))}</button>` : `<span
+            class="text-muted ss-fs-2 align-self-center me-2">${
+            esc(t('dcim_lib_no_imports'))}</span>`}
+        <button class="btn btn-sm btn-primary" onclick="_dcLibImportOpen()">
+            <i class="bi bi-download me-1"></i>${esc(t('dcim_lib_import_btn'))}</button></div>`;
+    return _dcLibCardHtml(t('dcim_lib_imports'), filas, pie);
+}
+
+/** Para quien solo lee: en vez de las importaciones, el atajo a las marcas que de verdad están
+ *  en la instalación, con su ficha a un clic — es lo que se busca a las tres de la mañana. */
+function _dcLibInUseHtml(s) {
+    const lista = s.in_use_brands;
+    if (lista === null || lista === undefined) {
+        return _dcLibCardHtml(t('dcim_lib_in_use'), '',
+            `<span class="text-muted ss-fs-2">${esc(t('dcim_brand_use_noperm'))}</span>`);
+    }
+    const filas = lista.map(b => _dcLibRow(`_dcLibBrandDrawer(${jsStr(String(b.uid))})`,
+        esc(b.name || ''), `<span class="text-muted ss-tabular">${
+            esc(tf('dcim_lib_n_placed', b.items || 0))}</span>`)).join('');
+    return _dcLibCardHtml(t('dcim_lib_in_use'), filas,
+        lista.length ? '' : `<span class="text-muted ss-fs-2">${esc(t('dcim_brand_use_none'))}</span>`);
+}
+
+// ── Las puertas: cada cifra, a su lista con su filtro ────────────────────────────────────
+
+/** A los Modelos con UN filtro puesto —el de la cifra pulsada— y nada más. */
+function _dcLibLand(que, valor) {
+    _dcCatFiltersReset();
+    _dcCatView = 'list';
+    if (que === 'img') _dcCatImg = 'none';
+    else if (que === 'ports') _dcCatNoPorts = 'none';
+    else if (que === 'brand') _dcCatBrand = 'none';
+    else if (que === 'unused') _dcCatUnused = '1';
+    else if (que === 'manual') _dcCatSrc = 'manual';
+    else if (que === 'import') _dcCatImp = String(valor || '');
+    else if (que === 'tree') _dcCatTree = String(valor || '');
+    _dcLibGo('models');
+}
+
+/** A las Marcas, en su vista «En uso en la instalación». */
+function _dcLibLandBrands() {
+    _dcBrandView = 'usage';
+    // Sin un filtro de antes escondiendo las marcas a las que se viene a mirar.
+    if (typeof window._ltFilterClear_dcbrd === 'function') window._ltFilterClear_dcbrd();
+    _dcLibGo('brands');
+}
+
+/** A las Plataformas, con el soporte pedido: `gone` o `soon`. */
+function _dcLibLandPlat(estado) {
+    _dcPlatEos = ['gone', 'soon', 'ok'].includes(estado) ? estado : '';
+    _dcPlatBrand = '';
+    _dcPlatBrandName = '';
+    _dcPlatQ = '';
+    _dcLibGo('platforms');
+}

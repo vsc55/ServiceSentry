@@ -1,0 +1,839 @@
+{# ================================================================
+   Infrastructure — the two network maps, laid out so that they still read at three hundred
+   machines.
+
+   Both maps were drawn as one long picture of the whole fleet: the address map as a tree that
+   came out as a single horizontal line with a fan of curves, the cable map as columns of
+   breadth-first tiers that came out as a strip one box wide and three hundred tall. With the
+   demo's 356 devices neither showed anything — the data was right and the layout did not
+   scale. Reported from the screen with both pictures.
+
+   What a person reading a network diagram asks first is WHERE: which building, which room.
+   The inventory already knows it (an item bound to a device sits in a rack, in a room, in a
+   site — `infra.service.places`), so both maps are now drawn as SITES:
+
+   * **a site is a frame** with its machines inside, arranged in BANDS: by role on the cable
+     map (edge → core → access → servers → endpoints, which is how a network is drawn by
+     hand), by network on the address map (the plate a machine hangs from is the band it is
+     in, so membership is containment and not a fan of three hundred lines);
+   * **a site can be folded** into one box with its count and its worst state, and the lines
+     to a folded site are added up into one with the number on it. A large fleet starts folded
+     (`_NG.AUTO`), so what opens is six sites with a red one among them rather than a picture
+     of nothing; what somebody folds or unfolds is kept per map on their account (the list's
+     table configuration, beside the view it remembers).
+   * **the sites are placed in two dimensions**: a few hundred rounds of springs on the BLOCKS
+     (connected sites pull together, all of them push apart), then their rectangles are pushed
+     out of each other. On blocks, never on machines: a spring layout of three hundred boxes is
+     the hairball the cable map was written not to draw, and it is O(n²) per round.
+
+   Everything here is a pure function of what it is given — no DOM, no state — so it is the
+   part the tests run in `node`, with a synthetic thousand-machine fleet and a time budget.
+   What is drawn, and what a press on it does, stays with each map.
+   ================================================================ #}
+
+//: Geometry of the clustered layout. One table, because the box the layout reserves and the box
+//: the drawing draws must be the same box, or the lines land beside what they join.
+const _NG = {
+    W: 176, H: 44,            // a machine
+    GX: 26, GY: 18,           // between two machines of one band
+    BAND: 26,                 // between two bands of one site
+    LABEL: 22,                // a band's label, above it
+    PAD: 18, HEAD: 42,        // inside a site's frame: padding, and the heading
+    GW: 250, GH: 66,          // a folded site
+    SEP: 70,                  // between two sites
+    //: Above this many machines on screen the sites start folded. Two hundred boxes fitted
+    //: into a pane are boxes of four pixels; six sites are six things you can read.
+    AUTO: 120,
+    //: …and above this many machines in one network of one site, that network starts folded
+    //: into its plate on the address map.
+    BAND_MAX: 24,
+    //: Above this many blocks the springs are skipped for a plain shelf packing: they are
+    //: O(blocks²) per round, and a fleet whose every machine declares a different location
+    //: would make that the dominant cost of drawing it.
+    FORCE_MAX: 80,
+};
+
+//: How bad a state is, worst highest. One order for machines, folded sites and lines: a link
+//: that is DOWN is worse news than a machine in error, which is worse than a degraded trunk.
+const _NG_RANK = {down: 6, error: 5, degraded: 4, warning: 3, maintenance: 2, ok: 1, '': 0};
+
+function ssNetWorst(states) {
+    let best = '';
+    for (const s of states || []) {
+        const k = String(s || '');
+        if ((_NG_RANK[k] || 0) > (_NG_RANK[best] || 0)) best = k;
+    }
+    return best;
+}
+
+/** The first part of a location a device declares about itself (sysLocation), which is the
+ *  site in every way people write one: `Madrid › CPD › R-04`, `Madrid > CPD`, `Madrid, planta 2`.
+ *  Only for a machine the inventory does not place — and named as what it is when drawn. */
+function ssNetLocationHead(text) {
+    const head = String(text || '').split(/\s*(?:\u203a|\u00bb|>|\||;|,|\/)\s*/)[0].trim();
+    return head.length > 48 ? head.slice(0, 47) + '…' : head;
+}
+
+/** Which group a node is drawn in: its inventory site, or failing that the place it says it is,
+ *  or none. `sites` maps a site uid to its name. */
+function ssNetGroupOf(node, sites) {
+    const n = node || {};
+    if (n.site && sites && sites.has(n.site))
+        return {key: 's:' + n.site, name: sites.get(n.site), kind: 'site'};
+    const loc = ssNetLocationHead(n.location);
+    if (loc) return {key: 'l:' + loc.toLowerCase(), name: loc, kind: 'loc'};
+    return {key: '-', name: '', kind: 'none'};
+}
+
+/** The groups of a set of nodes, biggest first and then by name — an order that does not move
+ *  between two refreshes of the same fleet. `{list: [{key, name, kind, members, worst, states}],
+ *  of: Map uid → key}`. */
+function ssNetGroups(nodes, groupOf) {
+    const by = new Map();
+    const of = new Map();
+    for (const n of nodes || []) {
+        const g = groupOf(n);
+        if (!by.has(g.key)) by.set(g.key, {key: g.key, name: g.name, kind: g.kind,
+                                           members: [], states: {}});
+        const grp = by.get(g.key);
+        grp.members.push(n.uid);
+        const st = String(n.status || '');
+        grp.states[st] = (grp.states[st] || 0) + 1;
+        of.set(n.uid, g.key);
+    }
+    const list = [...by.values()];
+    for (const g of list) g.worst = ssNetWorst(Object.keys(g.states));
+    // "No site" goes last whatever its size: it is the remainder, not a place.
+    list.sort((a, b) => (a.kind === 'none') - (b.kind === 'none')
+        || b.members.length - a.members.length || a.name.localeCompare(b.name));
+    return {list, of};
+}
+
+/** Which groups are folded, out of what somebody chose and the default for this size.
+ *
+ *  *pref* is `{all: 'open'|'fold'|undefined, k: {key: 1 (open) | 0 (folded)}}`: "unfold all"
+ *  is one decision and is stored as one, and a choice about one site overrides it. With a
+ *  single group there is nothing to fold — a frame round the whole picture says nothing. */
+function ssNetFolded(groups, total, pref) {
+    const out = new Set();
+    if (!groups || groups.length < 2) return out;
+    const p = pref || {};
+    const base = p.all === 'open' ? false : p.all === 'fold' ? true : total > _NG.AUTO;
+    for (const g of groups) {
+        const own = (p.k || {})[g.key];
+        if (own === 1 || own === 0 ? own === 0 : base) out.add(g.key);
+    }
+    return out;
+}
+
+/** Whether one PART of an open site is folded — a network's machines into its plate, a
+ *  switch's single-cable machines into the switch. Same preference, keyed by the part: what
+ *  somebody chose wins, then the choice for all parts of that kind (*allKey*), and otherwise
+ *  it folds when it holds more than *max* — a band of two hundred servers is a block of grey,
+ *  while twenty are twenty names. "Unfold the sites" does not open these: it is the sites that
+ *  were asked for, and opening every part as well is the unreadable picture over again. */
+function ssNetPartFolded(key, count, pref, max, allKey) {
+    const k = (pref || {}).k || {};
+    for (const x of [key, allKey]) {
+        if (x && (k[x] === 1 || k[x] === 0)) return k[x] === 0;
+    }
+    return count > max;
+}
+
+/** The picture after folding: what is drawn, and the lines between what is drawn.
+ *
+ *  *ids* are the things that would be drawn with nothing folded; *groupOf(id)* the group each
+ *  belongs to (`''` for one that never folds, like the way out). A line whose two ends land in
+ *  one folded site is inside it and is only counted; a line with a folded end is added to the
+ *  one already joining the same two things, so a site of forty machines cabled to the core is
+ *  ONE line with "40" on it and not forty lines into one box. Lines between two machines stay
+ *  one per edge (`keep`), because each is a cable somebody may want to read.
+ *
+ *  *opts.alias(id)* folds one thing INTO another inside an open site — a server into the switch
+ *  it hangs from, a network's machines into the network's plate — and returns the id it is
+ *  drawn as (itself when it is not folded). What each such id took in is in `absorbed`, and
+ *  the lines that end up inside it in `inside`/`insideState`, so the box can say "+12, one of
+ *  them down" instead of silently drawing fewer machines.
+ *
+ *  `{items: [{id, group, folded}], links: [{a, b, kind, count, state, edges}], inside,
+ *  insideState, absorbed}` — `edges` the indexes into *edges* each line stands for. */
+function ssNetFold(ids, edges, groupOf, folded, opts) {
+    const o = opts || {};
+    const present = new Set(ids);
+    for (const x of o.fixed || []) present.add(x);
+    const alias = o.alias || (id => id);
+    const end = id => {
+        const r = alias(id);
+        const g = groupOf(r);
+        return g && folded.has(g) ? 'grp:' + g : r;
+    };
+    const items = [];
+    const seen = new Set();
+    const absorbed = new Map();
+    for (const id of ids) {
+        const e = end(id);
+        if (e !== id && !e.startsWith('grp:')) {
+            if (!absorbed.has(e)) absorbed.set(e, []);
+            absorbed.get(e).push(id);
+        }
+        if (seen.has(e)) continue;
+        seen.add(e);
+        items.push(e.startsWith('grp:') ? {id: e, group: e.slice(4), folded: true}
+                                        : {id: e, group: groupOf(e), folded: false});
+    }
+    const links = [];
+    const merged = new Map();
+    const inside = new Map();
+    const insideState = new Map();
+    (edges || []).forEach((e, i) => {
+        if (!present.has(e.a) || !present.has(e.b)) return;
+        const a = end(e.a), b = end(e.b);
+        if (a === b) {
+            inside.set(a, (inside.get(a) || 0) + (e.count || 1));
+            insideState.set(a, ssNetWorst([insideState.get(a), e.state]));
+            return;
+        }
+        const kind = o.aggKind ? o.aggKind(e) : e.kind;
+        const single = o.keep && !a.startsWith('grp:') && !b.startsWith('grp:');
+        if (single) {
+            links.push({a, b, kind: e.kind, count: e.count || 1, state: e.state || '',
+                        edges: [i]});
+            return;
+        }
+        const [p, q] = a < b ? [a, b] : [b, a];
+        const key = p + '\u0000' + q + '\u0000' + kind;
+        let l = merged.get(key);
+        if (!l) {
+            // The ends as the first edge had them: an arrow keeps pointing the way it did.
+            l = {a, b, kind, count: 0, state: '', edges: [], agg: true};
+            merged.set(key, l);
+            links.push(l);
+        }
+        l.count += e.count || 1;
+        l.state = ssNetWorst([l.state, e.state]);
+        l.edges.push(i);
+    });
+    return {items, links, inside, insideState, absorbed};
+}
+
+/** How many columns a site's machines are wrapped at: about 1.6 times wider than tall once
+ *  drawn, which is the shape of a pane. Never fewer than four — a column of boxes is the strip
+ *  this was written to stop drawing. */
+function ssNetCols(n) {
+    return Math.max(4, Math.ceil(Math.sqrt(Math.max(1, n) * 0.55)));
+}
+
+/** The whole layout. *spec*:
+ *
+ *  * `items` — from `ssNetFold`;
+ *  * `groups` — `[{key, name, …}]` in drawing order; `grouped` — whether to draw frames at all;
+ *  * `band(id)` → `{key, order, label}`: which band of its site a machine is in;
+ *  * `name(id)` → the string a band is sorted by when nothing better orders it;
+ *  * `links` — from `ssNetFold`, used to order a band under the band above it and to pull
+ *    connected sites together.
+ *
+ *  Returns `{pos: Map id → {x, y, w, h}, frames, bands, width, height}` in the drawing's own
+ *  coordinates, everything at a whole-number position, nothing overlapping. */
+function ssNetLayout(spec) {
+    const items = spec.items || [];
+    const grouped = !!spec.grouped;
+    const nameOf = spec.name || (id => id);
+    const adj = new Map();
+    for (const l of spec.links || []) {
+        if (!adj.has(l.a)) adj.set(l.a, []);
+        if (!adj.has(l.b)) adj.set(l.b, []);
+        adj.get(l.a).push(l.b);
+        adj.get(l.b).push(l.a);
+    }
+    const head = grouped ? _NG.HEAD : 0;
+    const pad = grouped ? _NG.PAD : 0;
+
+    // ── One block per open site (its machines in bands) and per folded one (a box) ──
+    const byGroup = new Map();
+    const blocks = [];
+    for (const it of items) {
+        if (it.folded) {
+            blocks.push({key: it.group, folded: true, id: it.id, w: _NG.GW, h: _NG.GH,
+                         rel: new Map([[it.id, {x: 0, y: 0, w: _NG.GW, h: _NG.GH}]]),
+                         bands: []});
+            continue;
+        }
+        const g = grouped ? it.group : '';
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g).push(it.id);
+    }
+    const order = new Map((spec.groups || []).map((g, i) => [g.key, i]));
+    const open = [...byGroup.keys()].sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9)
+                                                    || String(a).localeCompare(String(b)));
+    for (const key of open) blocks.push(_ngBlock(key, byGroup.get(key), spec, adj, head, pad,
+                                                 nameOf));
+    blocks.sort((a, b) => (order.get(a.key) ?? 1e9) - (order.get(b.key) ?? 1e9)
+                          || String(a.key).localeCompare(String(b.key)));
+
+    // ── Where each block goes ──
+    _ngPlaceBlocks(blocks, adj);
+
+    const pos = new Map();
+    const frames = [];
+    const bands = [];
+    let farX = 0, farY = 0;
+    for (const b of blocks) {
+        for (const [id, r] of b.rel) {
+            pos.set(id, {x: b.x + r.x, y: b.y + r.y, w: r.w, h: r.h});
+        }
+        for (const bd of b.bands) bands.push(Object.assign({}, bd, {x: b.x + bd.x,
+                                                                    y: b.y + bd.y}));
+        if (!b.folded && grouped) frames.push({key: b.key, x: b.x, y: b.y, w: b.w, h: b.h});
+        farX = Math.max(farX, b.x + b.w);
+        farY = Math.max(farY, b.y + b.h);
+    }
+    return {pos, frames, bands, width: farX, height: farY, blocks: blocks.length};
+}
+
+/** One open site: its machines in bands, each band wrapped at the site's width and ordered
+ *  under the band above it (the barycentre of what each machine is joined to, already placed)
+ *  — which is what keeps a switch's servers under that switch instead of across the frame. */
+function _ngBlock(key, ids, spec, adj, head, pad, nameOf) {
+    const cols = ssNetCols(ids.length);
+    const bandsBy = new Map();
+    for (const id of ids) {
+        const b = spec.band ? spec.band(id) : {key: '', order: 0, label: ''};
+        if (!bandsBy.has(b.key)) bandsBy.set(b.key, {key: b.key, order: b.order,
+                                                     label: b.label || '', ids: []});
+        bandsBy.get(b.key).ids.push(id);
+    }
+    const bands = [...bandsBy.values()].sort((a, b) => a.order - b.order
+                                                       || String(a.key).localeCompare(String(b.key)));
+    const stepX = _NG.W + _NG.GX, stepY = _NG.H + _NG.GY;
+    // As wide as its widest band and no wider: a site of three machines in a frame sized for
+    // four columns is a frame of empty space.
+    const widest = Math.max(1, ...bands.map(b => Math.min(cols, b.ids.length)));
+    const rel = new Map();
+    const at = new Map();                      // id → column centre, for the barycentre
+    const outBands = [];
+    let y = head + pad;
+    for (const band of bands) {
+        const placed = band.ids.map(id => {
+            const near = (adj.get(id) || []).filter(n => at.has(n)).map(n => at.get(n));
+            return {id, bary: near.length ? near.reduce((s, v) => s + v, 0) / near.length
+                                          : Infinity, name: String(nameOf(id) || '')};
+        });
+        // NaN (two machines with nothing placed yet) is falsy, so those fall to the name.
+        placed.sort((a, b) => (a.bary - b.bary) || a.name.localeCompare(b.name)
+                              || (a.id < b.id ? -1 : 1));
+        const used = Math.min(cols, placed.length);
+        const top = y + _NG.LABEL;
+        placed.forEach((p, k) => {
+            const row = Math.floor(k / cols), col = k % cols;
+            // The last row of a band is centred under the rest: a ragged left edge reads as a
+            // machine missing.
+            const inRow = Math.min(cols, placed.length - row * cols);
+            const shift = (widest - inRow) * stepX / 2;
+            const x = pad + col * stepX + shift;
+            rel.set(p.id, {x: Math.round(x), y: Math.round(top + row * stepY),
+                           w: _NG.W, h: _NG.H});
+            at.set(p.id, col + (widest - inRow) / 2);
+        });
+        const rows = Math.ceil(placed.length / cols);
+        outBands.push({id: 'band:' + key + '|' + band.key, group: key, key: band.key,
+                       label: band.label, count: placed.length,
+                       x: pad - 8 + (widest - used) * stepX / 2, y,
+                       w: used * stepX - _NG.GX + 16,
+                       h: _NG.LABEL + rows * stepY - _NG.GY + 8});
+        y = top + rows * stepY - _NG.GY + _NG.BAND;
+    }
+    const w = pad * 2 + widest * stepX - _NG.GX;
+    const h = y - _NG.BAND + pad;
+    // As an END of a line, a band is its label — not the whole width of the band: a line to a
+    // plate twelve boxes wide leaves by its flank and loops right round the site.
+    for (const b of outBands) rel.set(b.id, {x: b.x, y: b.y, w: Math.min(b.w, _NG.W), h: _NG.LABEL});
+    return {key, folded: false, w: Math.max(w, _NG.GW), h, rel, bands: outBands};
+}
+
+/** Where each block goes. Deterministic — the same fleet draws the same picture on every
+ *  refresh, or the map would seem to move by itself.
+ *
+ *  Packed tight first (`_ngShelf`), then a few hundred rounds where every pair that is closer
+ *  than their two sizes allow pushes apart, every pair joined by lines pulls together, and all
+ *  of them drift towards the middle; then the rectangles are pushed out of each other. Sized
+ *  per PAIR on purpose: spacing everything by the largest block put five small sites a whole
+ *  main site's width away from it, and the fitted picture was a postage stamp in a field. */
+function _ngPlaceBlocks(blocks, adj) {
+    if (!blocks.length) return;
+    if (blocks.length === 1) { blocks[0].x = 0; blocks[0].y = 0; return; }
+    const n = blocks.length;
+    _ngShelf(blocks);
+    if (n > _NG.FORCE_MAX) return;
+    const index = new Map();
+    blocks.forEach((b, i) => { for (const id of b.rel.keys()) index.set(id, i); });
+    // Block-to-block weights, out of the machine-level lines.
+    const wts = new Map();
+    for (const [id, near] of adj) {
+        const i = index.get(id);
+        if (i === undefined) continue;
+        for (const m of near) {
+            const j = index.get(m);
+            if (j === undefined || j <= i) continue;
+            const k = i * n + j;
+            wts.set(k, (wts.get(k) || 0) + 1);
+        }
+    }
+    const cx = blocks.map(b => b.x + b.w / 2), cy = blocks.map(b => b.y + b.h / 2);
+    // A size for the springs, not for overlap: the rectangles are separated exactly after.
+    const r = blocks.map(b => Math.sqrt(b.w * b.h) * 0.55);
+    const mass = blocks.map(b => b.w * b.h);
+    for (let it = 0; it < 260; it++) {
+        const fx = new Float64Array(n), fy = new Float64Array(n);
+        let mx = 0, my = 0, tot = 0;
+        for (let i = 0; i < n; i++) { mx += cx[i] * mass[i]; my += cy[i] * mass[i];
+                                      tot += mass[i]; }
+        mx /= tot; my /= tot;
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                let dx = cx[j] - cx[i], dy = cy[j] - cy[i];
+                let d = Math.sqrt(dx * dx + dy * dy);
+                if (d < 1) { dx = 1; dy = (j - i) * 0.5; d = Math.sqrt(1 + dy * dy); }
+                const ux = dx / d, uy = dy / d;
+                const want = r[i] + r[j] + _NG.SEP;
+                let f = 0;
+                if (d < want) f -= (want - d) * 0.5;
+                const w = wts.get(i * n + j);
+                if (w && d > want) f += (d - want) * 0.12 * Math.min(3, Math.log2(1 + w));
+                // The lighter one moves more: five small sites go round the big one.
+                const si = mass[j] / (mass[i] + mass[j]), sj = mass[i] / (mass[i] + mass[j]);
+                fx[i] += f * ux * si; fy[i] += f * uy * si;
+                fx[j] -= f * ux * sj; fy[j] -= f * uy * sj;
+            }
+        }
+        for (let i = 0; i < n; i++) {
+            cx[i] += fx[i] + (mx - cx[i]) * 0.02;
+            cy[i] += fy[i] + (my - cy[i]) * 0.02;
+        }
+    }
+    blocks.forEach((b, i) => { b.x = cx[i] - b.w / 2; b.y = cy[i] - b.h / 2; });
+    _ngSeparate(blocks);
+    // To the origin, on whole numbers.
+    const ox = Math.min(...blocks.map(b => b.x)), oy = Math.min(...blocks.map(b => b.y));
+    for (const b of blocks) { b.x = Math.round(b.x - ox); b.y = Math.round(b.y - oy); }
+}
+
+/** Push overlapping rectangles apart along the axis where they overlap least, the bigger one
+ *  moving less. Ends when nothing overlaps; bounded, and a shelf packing finishes the job in
+ *  the case it ever does not. */
+function _ngSeparate(blocks) {
+    const m = _NG.SEP;
+    for (let pass = 0; pass < 400; pass++) {
+        let moved = false;
+        for (let i = 0; i < blocks.length; i++) {
+            for (let j = i + 1; j < blocks.length; j++) {
+                const a = blocks[i], b = blocks[j];
+                const ox = Math.min(a.x + a.w + m, b.x + b.w + m) - Math.max(a.x, b.x);
+                const oy = Math.min(a.y + a.h + m, b.y + b.h + m) - Math.max(a.y, b.y);
+                if (ox <= 0 || oy <= 0) continue;
+                moved = true;
+                const wa = a.w * a.h, wb = b.w * b.h;
+                const ka = wb / (wa + wb), kb = wa / (wa + wb);
+                if (ox < oy) {
+                    const dir = (a.x + a.w / 2) <= (b.x + b.w / 2) ? 1 : -1;
+                    a.x -= dir * ox * ka; b.x += dir * ox * kb;
+                } else {
+                    const dir = (a.y + a.h / 2) <= (b.y + b.h / 2) ? 1 : -1;
+                    a.y -= dir * oy * ka; b.y += dir * oy * kb;
+                }
+            }
+        }
+        if (!moved) return;
+    }
+    _ngShelf(blocks);
+}
+
+/** Rows of blocks, tallest first, wrapped at about the width that makes the whole roughly the
+ *  shape of a pane. O(n log n), for the fleets with too many sites for springs. */
+function _ngShelf(blocks) {
+    const area = blocks.reduce((s, b) => s + (b.w + _NG.SEP) * (b.h + _NG.SEP), 0);
+    const width = Math.max(Math.sqrt(area * 1.6), ...blocks.map(b => b.w));
+    const sorted = blocks.slice().sort((a, b) => b.h - a.h || String(a.key).localeCompare(String(b.key)));
+    let x = 0, y = 0, rowH = 0;
+    for (const b of sorted) {
+        if (x > 0 && x + b.w > width) { x = 0; y += rowH + _NG.SEP; rowH = 0; }
+        b.x = x; b.y = y;
+        x += b.w + _NG.SEP;
+        rowH = Math.max(rowH, b.h);
+    }
+}
+
+/** Where a device sits in a site on the cable map: its band. By what it IS (its type), and for
+ *  a switch by how it is used — one cabled to three or more other switches is the core, the
+ *  rest are access. A device of no type is placed by how many cables it has. */
+//: The bands of the cable map, top to bottom, and the word each is labelled with.
+const _NG_TIERS = [
+    {key: 'edge', label: 'infra_net_tier_edge'},
+    {key: 'core', label: 'infra_net_tier_core'},
+    {key: 'access', label: 'infra_net_tier_access'},
+    {key: 'server', label: 'infra_net_tier_server'},
+    {key: 'endpoint', label: 'infra_net_tier_endpoint'},
+];
+function ssNetTier(slug, degree, switchNear, wan) {
+    const s = String(slug || '');
+    if (wan || s === 'router' || s === 'firewall') return 0;
+    if (s === 'switch') return switchNear >= 3 ? 1 : 2;
+    if (s === 'server' || s === 'hypervisor' || s === 'nas') return 3;
+    if (!s) return degree >= 4 ? 2 : 4;
+    return 4;
+}
+
+/** The colour a line is drawn in for its state, or `''` for the colour of its kind. */
+function ssNetStateStroke(state) {
+    return ({down: 'var(--bs-danger)', error: 'var(--bs-danger)',
+             degraded: 'var(--bs-warning)', warning: 'var(--bs-warning)'})[String(state || '')]
+        || '';
+}
+
+// ── What a person chose: folds, per map, on their account ──────────────────────────────
+//
+// Kept in the list's table configuration — the per-user preferences the panel already saves
+// for this list (its columns, its view) — rather than in this browser: which sites somebody
+// keeps open is part of how they read this list, and it should follow them like the rest.
+
+//: `{map: {all, k}, links: {all, k}}` — see `ssNetFolded`.
+let _ngFold = {map: {}, links: {}};
+//: What each map's search box holds. In memory: it is what somebody is looking for now.
+const _ngFind = {map: '', links: ''};
+
+function _ngFoldPref(view) { return _ngFold[view] || (_ngFold[view] = {}); }
+
+/** Read back what the table configuration holds, on login and on a remote resync. Validated,
+ *  because it survives upgrades and anything else could have written it. */
+function ssNetFoldApply(saved) {
+    const clean = {map: {}, links: {}};
+    for (const v of ['map', 'links']) {
+        const p = (saved && typeof saved === 'object' && saved[v]) || {};
+        if (p.all === 'open' || p.all === 'fold') clean[v].all = p.all;
+        const k = {};
+        for (const [key, val] of Object.entries(p.k && typeof p.k === 'object' ? p.k : {})) {
+            if (val === 0 || val === 1) k[String(key).slice(0, 200)] = val;
+        }
+        if (Object.keys(k).length) clean[v].k = k;
+    }
+    _ngFold = clean;
+}
+
+function ssNetFoldSaved() { return JSON.parse(JSON.stringify(_ngFold)); }
+
+/** Fold or unfold one site of one map, and remember it. *key* may also be a part of one —
+ *  `~leaves:<switch>`, `~net:<plate>` — which the folding of sites leaves alone. */
+function ssNetFoldSet(view, key, open) {
+    const p = _ngFoldPref(view);
+    p.k = Object.assign({}, p.k || {}, {[key]: open ? 1 : 0});
+    _ngFoldChanged();
+}
+
+/** All of them, one way — and the one-site choices go with it: "unfold everything" that left
+ *  three sites folded because of an old click would not be what the button says. The choices
+ *  about PARTS (`~…`) stay: they are about something else. */
+function ssNetFoldAll(view, open) {
+    const k = {};
+    for (const [key, v] of Object.entries(_ngFoldPref(view).k || {}))
+        if (key.startsWith('~')) k[key] = v;
+    _ngFold[view] = Object.keys(k).length ? {all: open ? 'open' : 'fold', k}
+                                          : {all: open ? 'open' : 'fold'};
+    _ngFoldChanged();
+}
+
+/** One kind of part — `~leaves` (what hangs from a switch by one cable), `~net` (a network's
+ *  machines in its plate) — folded or not everywhere at once; the choices about single parts of
+ *  that kind go with it, as they do with "unfold all". */
+function ssNetPartsAll(view, kind, open) {
+    const p = _ngFoldPref(view);
+    const k = {};
+    for (const [key, v] of Object.entries(p.k || {})) if (!key.startsWith(kind)) k[key] = v;
+    k[kind] = open ? 1 : 0;
+    p.k = k;
+    _ngFoldChanged();
+}
+
+function _ngFoldChanged() {
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    if (typeof ssCanvasReset === 'function') { ssCanvasReset('infraNetSvg');
+                                               ssCanvasReset('infraLinkSvg'); }
+    if (typeof _infraRender === 'function') _infraRender();
+}
+
+// ── Drawing pieces both maps share ───────────────────────────────────────────────────────
+
+//: A device type's icon as a glyph of the icon font, by class — `foreignObject` per box is
+//: what made a few hundred boxes slow to draw and slower to pan. Read once per class from the
+//: stylesheet the page already has; `''` where it cannot be (no DOM), and the box falls back.
+const _ngGlyph = {};
+function ssNetGlyph(cls) {
+    if (cls in _ngGlyph) return _ngGlyph[cls];
+    let out = '';
+    try {
+        const i = document.createElement('i');
+        i.className = 'bi ' + cls;
+        i.style.position = 'absolute';
+        i.style.visibility = 'hidden';
+        document.body.appendChild(i);
+        const c = getComputedStyle(i, '::before').content || '';
+        i.remove();
+        const m = c.match(/^["'](.+)["']$/);
+        if (m) out = m[1];
+    } catch (_) { out = ''; }
+    _ngGlyph[cls] = out;
+    return out;
+}
+
+/** The icon on a box: the font's glyph as SVG text, or the old `foreignObject` where the glyph
+ *  could not be read. */
+function ssNetIcon(cls, x, y, size, color) {
+    const g = ssNetGlyph(cls);
+    if (g) {
+        return `<text x="${x}" y="${y + size - 2}" font-size="${size}"
+                      font-family="bootstrap-icons" fill="${color}"
+                      class="ss-net-glyph">${esc(g)}</text>`;
+    }
+    return `<foreignObject x="${x}" y="${y}" width="${size + 4}" height="${size + 4}">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size:${size}px;line-height:1;color:${color}">
+            <i class="bi ${escAttr(cls)}"></i></div></foreignObject>`;
+}
+
+/** The counts of a group by state, as the dots under its name. */
+function _ngStateDots(states, x, y) {
+    let cx = x;
+    const out = [];
+    for (const s of ['error', 'warning', 'maintenance', 'ok', '']) {
+        const n = (states || {})[s];
+        if (!n) continue;
+        out.push(`<circle cx="${cx + 4}" cy="${y - 4}" r="4"
+                          fill="${deviceStateColor(s === 'maintenance' ? '' : s,
+                                                   s === 'maintenance')}"></circle>
+                  <text x="${cx + 11}" y="${y}" font-size="10.5"
+                        fill="var(--bs-secondary-color)">${n}</text>`);
+        cx += 18 + String(n).length * 6.5;
+    }
+    return out.join('');
+}
+
+/** A folded site: one box, its name, how many machines and how they are, and the worst of
+ *  them on its edge — so a site in trouble is red from across the room while it is folded.
+ *
+ *  …and the worst of the lines folded INSIDE it, *insideState*: a dead cable between two of its
+ *  machines is news even when both machines still answer, and folding the site must not be
+ *  what hides it. */
+function ssNetGroupBox(g, p, inside, insideState) {
+    const line = ssNetStateStroke(insideState);
+    const tone = line && (_NG_RANK[insideState] || 0) > (_NG_RANK[g.worst] || 0) ? line
+        : g.worst ? deviceStateColor(g.worst === 'maintenance' ? '' : g.worst,
+                                     g.worst === 'maintenance')
+                  : 'var(--bs-border-color)';
+    const icon = g.kind === 'site' ? 'bi-building' : g.kind === 'loc' ? 'bi-geo-alt'
+                                                                      : 'bi-question-circle';
+    const name = g.kind === 'none' ? t('infra_net_no_site') : g.name;
+    return `<g class="ss-grab" data-node="${escAttr('grp:' + g.key)}"
+               data-open="${escAttr('grp:' + g.key)}" data-id="${escAttr('grp:' + g.key)}"
+               onpointerenter="_ngHover(${jsStr('grp:' + g.key)})"
+               onpointerleave="_ngHover('')">
+        <title>${escAttr(name + ' · ' + tf('infra_net_group_count', g.members.length)
+                         + ' · ' + t('infra_net_unfold_tt'))}</title>
+        <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="10"
+              fill="var(--bs-tertiary-bg)" stroke="${tone}" stroke-width="2.5"></rect>
+        <rect x="${p.x}" y="${p.y}" width="6" height="${p.h}" rx="3" fill="${tone}"></rect>
+        ${ssNetIcon(icon, p.x + 16, p.y + 11, 16, 'var(--bs-secondary-color)')}
+        <text x="${p.x + 40}" y="${p.y + 25}" font-size="13" font-weight="700"
+              fill="currentColor">${esc(_infraMapClip(name, 21))}</text>
+        <text x="${p.x + 16}" y="${p.y + 46}" font-size="10.5"
+              fill="var(--bs-secondary-color)">${esc(tf('infra_net_group_count',
+                                                       g.members.length))}${
+              inside ? ' · ' + esc(tf('infra_net_inside', inside)) : ''}</text>
+        <g>${_ngStateDots(g.states, p.x + 16, p.y + 60)}</g>
+        <text x="${p.x + p.w - 14}" y="${p.y + 25}" font-size="15" text-anchor="end"
+              fill="var(--bs-secondary-color)">+</text>
+    </g>`;
+}
+
+/** An open site: its frame, and a heading that folds it again. */
+function ssNetFrame(g, f) {
+    if (!g) return '';
+    const name = g.kind === 'none' ? t('infra_net_no_site') : g.name;
+    const icon = g.kind === 'site' ? 'bi-building' : g.kind === 'loc' ? 'bi-geo-alt'
+                                                                      : 'bi-question-circle';
+    const tone = g.worst ? deviceStateColor(g.worst === 'maintenance' ? '' : g.worst,
+                                            g.worst === 'maintenance')
+                         : 'var(--bs-border-color)';
+    return `<g>
+        <rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="12"
+              fill="var(--bs-tertiary-bg)" fill-opacity=".45"
+              stroke="var(--bs-border-color)" stroke-width="1.2"></rect>
+        <g class="ss-pointer" data-fold="${escAttr(g.key)}">
+            <title>${escAttr(t('infra_net_fold_tt'))}</title>
+            <rect x="${f.x}" y="${f.y}" width="${f.w}" height="${_NG.HEAD - 8}" rx="12"
+                  fill="transparent"></rect>
+            <rect x="${f.x + 12}" y="${f.y + 12}" width="5" height="16" rx="2"
+                  fill="${tone}"></rect>
+            ${ssNetIcon(icon, f.x + 24, f.y + 11, 16, 'var(--bs-secondary-color)')}
+            <text x="${f.x + 46}" y="${f.y + 26}" font-size="14" font-weight="700"
+                  fill="currentColor">${esc(_infraMapClip(name, Math.max(8,
+                      Math.floor((f.w - 110) / 8.2))))}<tspan font-size="11" font-weight="400"
+                  fill="var(--bs-secondary-color)"> · ${g.members.length}</tspan></text>
+            <rect x="${f.x + f.w - 30}" y="${f.y + 10}" width="20" height="18" rx="5"
+                  fill="var(--bs-secondary-bg)"></rect>
+            <text x="${f.x + f.w - 20}" y="${f.y + 24}" font-size="13" text-anchor="middle"
+                  fill="var(--bs-secondary-color)">&#8722;</text>
+        </g>
+    </g>`;
+}
+
+/** The number on a line that stands for several. */
+function ssNetCountPill(a, b, count, tone) {
+    if (!(count > 1)) return '';
+    const x = (a.x + a.w / 2 + b.x + b.w / 2) / 2;
+    const y = (a.y + a.h / 2 + b.y + b.h / 2) / 2;
+    const w = 14 + String(count).length * 7;
+    return `<g class="ss-net-pill"><rect x="${x - w / 2}" y="${y - 9}" width="${w}" height="18"
+                  rx="9" fill="var(--bs-body-bg)" stroke="${tone || 'var(--bs-border-color)'}">
+            </rect><text x="${x}" y="${y + 4}" font-size="10.5" text-anchor="middle"
+                  font-weight="600" fill="currentColor">${count}</text></g>`;
+}
+
+/** The map's own row of controls: fold/unfold all (when there are sites) and the search box. */
+function ssNetToolsHtml(view, grouped) {
+    const q = _ngFind[view] || '';
+    return `${grouped ? `<span class="btn-group btn-group-sm">
+            <button class="btn btn-sm btn-secondary" onclick="ssNetFoldAll(${jsStr(view)},false)"
+                    title="${escAttr(t('infra_net_fold_all_tt'))}"
+                    ><i class="bi bi-arrows-collapse me-1"></i>${esc(t('infra_net_fold_all'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="ssNetFoldAll(${jsStr(view)},true)"
+                    title="${escAttr(t('infra_net_unfold_all_tt'))}"
+                    ><i class="bi bi-arrows-expand me-1"></i>${esc(t('infra_net_unfold_all'))}</button>
+        </span>` : ''}
+        <input type="search" class="form-control form-control-sm ss-net-find"
+               placeholder="${escAttr(t('infra_net_find'))}" value="${escAttr(q)}"
+               title="${escAttr(t('infra_net_find_tt'))}"
+               oninput="ssNetFind(${jsStr(view)}, this.value)"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();ssNetFindGo(${jsStr(view)})}">`;
+}
+
+/** Which drawn things match a search, and which are next to them: a match is lit with its
+ *  neighbours, everything else steps back. Pure, so the tests can ask it.
+ *
+ *  *things* is `[{id, text}]` — a machine's name and addresses, a folded site's name and the
+ *  names inside it; *links* the lines drawn. */
+function ssNetMatch(query, things, links) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return null;
+    const hits = new Set(things.filter(x => String(x.text || '').toLowerCase().includes(q))
+                               .map(x => x.id));
+    const lit = new Set(hits);
+    for (const l of links || []) {
+        if (hits.has(l.a)) lit.add(l.b);
+        if (hits.has(l.b)) lit.add(l.a);
+    }
+    return {hits, lit};
+}
+
+/** Mark what matches without redrawing (the pointer may be on the picture). */
+function ssNetFindPaint(svgId, m) {
+    const svg = typeof ssCanvasSvg === 'function' ? ssCanvasSvg(svgId) : null;
+    if (!svg) return;
+    svg.classList.toggle('ss-net-finding', !!m);
+    svg.querySelectorAll('[data-id]').forEach(g => {
+        g.classList.toggle('ss-net-hit', !!m && m.hits.has(g.dataset.id));
+        g.classList.toggle('ss-net-near', !!m && m.lit.has(g.dataset.id)
+                                          && !m.hits.has(g.dataset.id));
+    });
+    svg.querySelectorAll('[data-a]').forEach(g => {
+        g.classList.toggle('ss-net-near', !!m && m.lit.has(g.dataset.a) && m.lit.has(g.dataset.b)
+                                          && (m.hits.has(g.dataset.a) || m.hits.has(g.dataset.b)));
+    });
+}
+
+function ssNetFind(view, q) {
+    _ngFind[view] = String(q || '');
+    const fn = view === 'links' ? '_infraLinkFind' : '_infraMapFind';
+    if (typeof window[fn] === 'function') window[fn]();
+}
+
+/** Enter in the search box: open the site of the first match if it is folded, and go to it. */
+function ssNetFindGo(view) {
+    const fn = view === 'links' ? '_infraLinkFindGo' : '_infraMapFindGo';
+    if (typeof window[fn] === 'function') window[fn]();
+}
+
+//: Below this many screen pixels per drawing unit a machine's words are under five pixels
+//: tall — nobody reads them, and they are most of what it costs to repaint a frame of a few
+//: hundred boxes. So they are not drawn there: the boxes, their colour and the lines stay, and
+//: the names come back as soon as the zoom makes them readable. Folded sites and the sites'
+//: headings keep theirs, which are what a far-away picture is read by.
+const _NG_FAR = 0.5;
+
+/** How far the window is, by its scale on screen, as a class on the svg. */
+function ssNetLod(svgId, v) {
+    const svg = typeof ssCanvasSvg === 'function' ? ssCanvasSvg(svgId) : null;
+    if (!svg) return;
+    const w = (v && v.w) || +svg.dataset.w || 1;
+    const h = (v && v.h) || +svg.dataset.h || 1;
+    const r = svg.getBoundingClientRect();
+    const k = Math.min((r.width || 0) / w, (r.height || 0) / h);
+    svg.classList.toggle('ss-net-far', k > 0 && k < _NG_FAR);
+}
+
+/** …and keep it so as the window moves — through the canvas's own hook, so nothing here
+ *  listens to the wheel a second time. */
+function ssNetLodWatch(svgId) {
+    if (typeof ssCanvasOnApply !== 'function') return;
+    ssCanvasOnApply(svgId, v => ssNetLod(svgId, v));
+    ssNetLod(svgId, typeof _ssVB !== 'undefined' ? _ssVB[svgId] : null);
+}
+
+/** Put the window round one box, at a zoom where its name reads. */
+function ssNetFocus(svgId, p) {
+    if (!p || typeof _ssVB === 'undefined') return;
+    const w = Math.max(900, p.w * 6), h = w * 0.6;
+    _ssVB[svgId] = {x: p.x + p.w / 2 - w / 2, y: p.y + p.h / 2 - h / 2, w, h};
+    ssCanvasApply(svgId);
+}
+
+//: What the pointer is on, by drawn id, for the one card both maps show for a folded site or
+//: a line that adds several up. Each map keeps its own hover for everything else.
+let _ngOn = '';
+function _ngHover(id) {
+    _ngOn = String(id || '');
+    if (typeof _infraView === 'undefined') return;
+    const v = _infraView.id();
+    if (v === 'links' && typeof _infraLinkNodeHover === 'function') _infraLinkNodeHover(_ngOn);
+    else if (v === 'map' && typeof _infraMapHover === 'function')
+        _infraMapHover(_ngOn ? 'device' : '', _ngOn);
+}
+
+/** The card of a folded site: how its machines are, the ones in trouble by name, and what
+ *  pressing it does. */
+function ssNetGroupCard(g, byUid, insideState) {
+    if (!g) return '';
+    const bad = g.members.map(u => byUid.get(u)).filter(n => n && (n.status === 'error'
+                                                                   || n.status === 'warning'))
+        .sort((a, b) => (_NG_RANK[b.status] || 0) - (_NG_RANK[a.status] || 0)
+                        || String(a.name).localeCompare(String(b.name)));
+    const chips = bad.slice(0, 12).map(n => `<button class="btn btn-sm btn-secondary py-0 px-2
+            ss-fs-2" onclick="infraOpen(${jsStr(n.uid)})"><span class="d-inline-block
+            rounded-circle me-1" style="width:.5rem;height:.5rem;background:${
+            deviceStateColor(n.status)}"></span>${esc(n.name || n.uid)}</button>`).join('');
+    const name = g.kind === 'none' ? t('infra_net_no_site') : g.name;
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <i class="bi ${g.kind === 'loc' ? 'bi-geo-alt' : 'bi-building'} text-muted"></i>
+            <span class="fw-semibold">${esc(name)}</span>
+            <span class="text-muted">${esc(tf('infra_net_group_count', g.members.length))}</span>
+            ${g.kind === 'loc' ? `<span class="text-muted ss-fs-3">${
+                esc(t('infra_net_loc_said'))}</span>` : ''}
+            <span class="text-muted ss-fs-2 ms-auto"><i class="bi bi-hand-index me-1"></i>${
+                esc(t('infra_net_unfold_tt'))}</span>
+        </div>
+        ${insideState === 'down' ? `<div class="text-danger mb-1"><i
+            class="bi bi-exclamation-octagon me-1"></i>${esc(t('infra_net_inside_down'))}</div>`
+            : ''}
+        ${chips ? `<div class="d-flex flex-wrap gap-1">${chips}${bad.length > 12
+            ? `<span class="text-muted ss-fs-3">+${bad.length - 12}</span>` : ''}</div>`
+                : `<div class="text-muted">${esc(t('infra_net_group_fine'))}</div>`}
+    </div>`;
+}

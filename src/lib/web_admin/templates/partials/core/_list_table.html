@@ -51,6 +51,18 @@ function createListTable(spec) {
     // goes flush automatically (see web_admin.css), which is how every list section renders
     // edge-to-edge today. No per-table flag to keep in sync.
     const cardClass = spec.cardClass || 'ss-card';
+    // ── Optional server-side paging ─────────────────────────────────────────────────────
+    // A list too big to bring whole (thousands of catalogue models) opts in with
+    // spec.serverPaging = { total(ctx) -> n, maxPageSize? }. The factory then trusts
+    // spec.rows(ctx) to BE the current page, already filtered and sorted by the server: it
+    // neither filters, sorts nor slices it, and takes the count from total(). Paging, sorting
+    // and the page size still go through the same state and handlers, so spec.prepare() —
+    // which runs on every render — is where such a table fetches the page those ask for.
+    // maxPageSize drops the larger choices (and "all") from the page-size selector: a size the
+    // server would not honour is a selector that lies.
+    const server = spec.serverPaging || null;
+    const pageChoices = () => (server && server.maxPageSize
+        ? _tableRowChoices.filter(s => s > 0 && s <= server.maxPageSize) : null);
 
     // ── Optional filter bar ────────────────────────────────────────────────────────────
     // A table opts in with spec.filters = { fields, match, always? }: `fields` is the shared
@@ -186,6 +198,11 @@ function createListTable(spec) {
         // getOrd() never return null (e.g. cluster' "use defaults" sentinel).
         if (st.visible.get() == null) st.visible.set(new Set());
         if (st.order.get() == null) st.order.set([]);
+        // The page size is settled BEFORE prepare(): a server-paged table fetches with it.
+        if (st.pageSize.get() == null) st.pageSize.set(_tableRowsDefault);
+        if (server && server.maxPageSize
+            && (!st.pageSize.get() || st.pageSize.get() > server.maxPageSize))
+            st.pageSize.set(server.maxPageSize);
         const ctx = (spec.prepare ? await spec.prepare() : {}) || {};
         if (fbSchema) {
             fbCtx = ctx;
@@ -194,7 +211,6 @@ function createListTable(spec) {
             else _fbSyncSelects();      // built already: just refresh the choices in place
             device = c.querySelector('.ss-lt-body');
         }
-        if (st.pageSize.get() == null) st.pageSize.set(_tableRowsDefault);
         const cols = _cols(ctx);
 
         // Auto-register columns the user has never seen (dynamic tables).
@@ -209,7 +225,9 @@ function createListTable(spec) {
         }
 
         let rows = spec.rows(ctx).slice();
-        if (fbSchema) {
+        // Server-paged: these rows are the page the server answered, in its order — filtering
+        // or sorting them here would be doing it to one page and calling it the list.
+        if (fbSchema && !server) {
             // `rows` may be keys rather than records (users are usernames), so hand match()
             // the resolved record — and the raw row too, for the rare case it needs it.
             const n = _fbActive();
@@ -233,7 +251,7 @@ function createListTable(spec) {
         // nombre —el estado va de peor a mejor y no de la A a la Z— y sin él «error, ok, sin
         // vigilar, warning» pondría lo que está mal en medio de lo que está bien.
         const agrupa = spec.groupOf ? spec.groupOf(null, ctx, true) !== null : false;
-        rows.sort((a, b) => {
+        if (!server) rows.sort((a, b) => {
             if (agrupa) {
                 const ga = spec.groupRank ? spec.groupRank(spec.groupOf(a, ctx), ctx)
                                           : String(spec.groupOf(a, ctx));
@@ -248,7 +266,7 @@ function createListTable(spec) {
             return dir === 'asc' ? cmp : -cmp;
         });
 
-        const total = rows.length;
+        const total = server ? Math.max(0, Number(server.total(ctx)) || 0) : rows.length;
         const sel = st.selected ? st.selected() : null;
         // Optional alternate body modes: 'cards' (an alternate body over the same PAGE — the
         // sessions/users/roles card grids) and 'summary' (a body that describes the whole
@@ -283,6 +301,10 @@ function createListTable(spec) {
             ${refresh}
             ${headerBtns}
         </div>`;
+        // What a table puts INSIDE its card right under the header, above the pagination band:
+        // a row of segmented filters, a selection band. In the empty states too — the control
+        // that narrowed the list to nothing is the one that has to stay to widen it again.
+        const toolsHtml = spec.toolbar ? (spec.toolbar(ctx, mode) || '') : '';
 
         if (!total) {
             // "Nothing matched" is NOT "nothing exists": a table's own empty state says
@@ -300,15 +322,17 @@ function createListTable(spec) {
             // emptyBody (and the filtered state) → card + header + body, so the toolbar stays;
             // emptyState → bare (no card). The empty card still fills its pane (.ss-vfill +
             // .ss-vscroll body) so an empty table stretches exactly like a populated one.
-            if (emptyHtml != null) device.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}<div class="ss-vscroll">${emptyHtml}</div></div>`;
+            if (emptyHtml != null) device.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}${toolsHtml}<div class="ss-vscroll">${emptyHtml}</div></div>`;
             else device.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
             return;
         }
 
         const ps = st.pageSize.get() || total;
         const page = Math.max(1, Math.min(st.page.get(), Math.ceil(total / ps)));
-        st.page.set(page);
-        const pageRows = summary ? rows : rows.slice((page - 1) * ps, page * ps);
+        // Server-paged, the page is the one that was fetched: writing a clamped one back would
+        // change what the next prepare() asks for without anything having been asked.
+        if (!server) st.page.set(page);
+        const pageRows = (summary || server) ? rows : rows.slice((page - 1) * ps, page * ps);
         st.currentPage.set(pageRows.map(r => spec.rowKey(r)));
 
         let h;
@@ -399,12 +423,14 @@ function createListTable(spec) {
         // A summary is not paginated, so it gets no bands: a "showing 1–25 of 60" over a body
         // that is describing all 60 would be counting a different thing than the body is.
         const pagination = summary ? ''
-            : _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
+            : _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize,
+                                pageChoices());
         const band = pos => pagination
             ? `<div class="ss-card-band ss-card-band-${pos}">${pagination}</div>` : '';
         device.innerHTML = `<div class="${cardClass} ss-vfill">
         ${accentDiv}
         ${headerHtml}
+        ${toolsHtml}
         ${band('top')}
         ${spec.beforeBody ? (spec.beforeBody(ctx, rows) || '') : ''}
         <div class="ss-vscroll">${h}</div>

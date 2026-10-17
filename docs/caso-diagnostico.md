@@ -5,6 +5,58 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Dos días de historial que se quedaban en veinte minutos
+
+**Síntoma.** En el servidor de verificación, con el planificador cada minuto, la demo instalada
+enseñaba dos días de ping y de SNMP, pero CPU, memoria, disco y la web solo tenían veinte minutos
+de historial. En las pruebas, sin planificador, los dos días estaban siempre.
+
+**Diagnóstico.** El relleno del pasado (`demo_monitor._backfill`) se salta una serie que ya
+existe —es lo que hace que instalar dos veces no duplique—. Contando las series con `item_uid`
+(lo que solo escribe el relleno) salían 116 de ping y ninguna de CPU: el relleno había empezado
+y, al llegar a las demás, ya existían.
+
+**Causa raíz.** El orden: las comprobaciones se guardaban en la configuración ANTES de escribir su
+pasado, y el planificador, que lee esa configuración en cada ciclo, contestaba las nuevas en
+cuanto aparecían. Una serie empezada por él era, para el relleno, «ya rellenada». Y aunque no la
+saltara, escribir muestras viejas detrás de una nueva habría dejado como «última» una del pasado.
+
+**Solución.** El pasado se escribe antes de que las comprobaciones lleguen a la configuración: sus
+claves son deterministas (uuid5 del equipo y el módulo), así que se conocen sin guardarlas. Lo
+prueba `test_the_past_is_written_before_the_scheduler_can_answer`, que comprueba que al rellenar
+no hay todavía ninguna comprobación de la demo en la configuración.
+
+**Lección.** Todo lo que se escribe para un objeto que un proceso en segundo plano ya puede ver
+compite con él. Si una escritura depende de que el otro no haya llegado, hacerla antes de
+publicar el objeto, no confiar en ganar la carrera; y probar con el planificador en marcha, no
+solo con él parado.
+
+## Una importación que fallaba sin decir nada, y otra que terminaba sin que nadie se enterara
+
+**Síntoma.** Al pasar Importar de pestaña a cuadro, con un aviso al terminar «aunque se haya
+cerrado el cuadro», la prueba del aviso pasaba para una importación que acababa bien y no para
+una que acababa con error: no salía ningún aviso. Y en el panel, una importación lanzada antes de
+ir al inventario terminaba sin avisar nunca.
+
+**Diagnóstico.** El vigilante (`_dcCatWatch`) pregunta cada segundo por el trabajo y, si la
+respuesta trae `error`, deja de mirar sin decir nada. Un trabajo que no existe contesta 404 con
+`{error}`; uno que TERMINÓ mal contesta 200 con `{done: true, error: …}`. Las dos respuestas
+tenían la clave que el vigilante miraba. Aparte, `renderDcim` del inventario vaciaba `_dcCatJob`
+para no arrastrar el catálogo, y el vigilante, al ver el identificador vacío, se paraba.
+
+**Causa raíz.** Dos formas de respuesta que comparten una clave con significados distintos, y
+un estado de fondo (la importación en curso) guardado en una variable que una pantalla ajena
+limpiaba al dibujarse.
+
+**Solución.** El vigilante distingue por `done`: sin trabajo es `error` sin `done`; con `done` se
+avisa siempre, bien o mal. El inventario ya no toca `_dcCatJob`, y cada vuelta del vigilante solo
+redibuja la biblioteca si está a la vista (`_dcLibJobTick`). Lo prueban
+`test_an_import_that_failed_is_told_too` y `test_leaving_for_the_inventory_does_not_kill_the_watcher`.
+
+**Lección.** Antes de leer «hay error» como «no hay nada», mirar todas las respuestas que pueden
+llegar por ese camino: un error del recurso y un error del trabajo no son lo mismo. Y lo que
+sigue vivo en segundo plano no puede guardarse donde otra pantalla limpia lo suyo.
+
 ## Una ruta nueva que tapaba a otra que ya existía, y unos cuadros probados con datos inventados
 
 **Síntoma.** Tras añadir «qué tiene dentro» antes de borrar, siete pruebas de sitios distintos

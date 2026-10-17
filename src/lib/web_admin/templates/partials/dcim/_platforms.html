@@ -36,6 +36,51 @@ let _dcPlatSel = new Set();
 //: Qué ramas están cerradas. Cerradas y no abiertas: recién llegado se quiere ver lo que hay, y
 //: un árbol que empieza todo plegado obliga a abrir cuatro cosas para leer lo mismo.
 let _dcPlatShut = new Set();
+//: Qué soporte se está mirando: `gone` (ya sin soporte), `soon` (caduca en menos de seis meses),
+//: `ok` (vigente) o vacío (todas). Por la fecha «Fin de soporte» de la ficha (`eol`). Va en la
+//: dirección (`eos`), y es a donde llevan las cifras del Resumen.
+let _dcPlatEos = '';
+//: Cuántos días antes del fin de soporte se dice «caduca»: los mismos que cuenta el Resumen en el
+//: servidor (`SOON_DAYS`), para que la cifra y la lista a la que lleva digan lo mismo.
+const _DCPLAT_SOON_DAYS = 182;
+
+/** En qué punto del soporte está una plataforma: `gone`, `soon`, `ok` o `none` (sin fecha). */
+function _dcPlatEosOf(p, hoy, pronto) {
+    const fin = String(((p || {}).extra || {}).eol || '').slice(0, 10);
+    if (!fin) return 'none';
+    if (fin <= hoy) return 'gone';
+    return fin <= pronto ? 'soon' : 'ok';
+}
+
+/** Hoy y el límite de «caduca pronto», como texto ISO — que es como se guarda la fecha. */
+function _dcPlatEosDays() {
+    const hoy = new Date();
+    const pronto = new Date(hoy.getTime() + _DCPLAT_SOON_DAYS * 86400000);
+    return [hoy.toISOString().slice(0, 10), pronto.toISOString().slice(0, 10)];
+}
+
+/** El selector de soporte, con cuántas hay de cada. */
+function _dcPlatEosHtml(todas) {
+    const [hoy, pronto] = _dcPlatEosDays();
+    const n = (k) => todas.filter(p => _dcPlatEosOf(p, hoy, pronto) === k).length;
+    const boton = (k, etiqueta, cuenta) => `<button class="btn ${
+            _dcPlatEos === k ? 'btn-primary' : 'btn-secondary'}"
+            onclick="_dcPlatEosSet(${jsStr(k)})">${esc(etiqueta)}
+        <span class="ss-tabular ms-1">${esc(String(cuenta))}</span></button>`;
+    return `<div class="btn-group btn-group-sm flex-wrap" role="group"
+                 aria-label="${escAttr(_dcAttrName('eol'))}">
+        ${boton('', t('dcim_lib_eos_all'), todas.length)}
+        ${boton('gone', t('dcim_lib_eos_gone'), n('gone'))}
+        ${boton('soon', t('dcim_lib_eos_soon'), n('soon'))}
+        ${boton('ok', t('dcim_lib_eos_ok'), n('ok'))}
+    </div>`;
+}
+
+function _dcPlatEosSet(k) {
+    _dcPlatEos = ['gone', 'soon', 'ok'].includes(k) ? k : '';
+    if (typeof _dcCatUrlSave === 'function') _dcCatUrlSave();
+    renderDcim();
+}
 
 /** Marcar o desmarcar una. */
 function _dcPlatPick(uid, si) {
@@ -47,10 +92,12 @@ function _dcPlatPick(uid, si) {
  *  lleve por delante lo que el filtro escondía es la sorpresa que no se deshace. */
 function _dcPlatSelAll(si) {
     const q = _dcPlatQ.trim().toLowerCase();
+    const [hoy, pronto] = _dcPlatEosDays();
     ((_dcPlats || {}).rows || [])
         // Las mismas que se ven: marcar todas con una marca puesta no marca las de otras.
         .filter(p => (!q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0)
-                     && (!_dcPlatBrand || String(p.brand_uid || '') === _dcPlatBrand))
+                     && (!_dcPlatBrand || String(p.brand_uid || '') === _dcPlatBrand)
+                     && (!_dcPlatEos || _dcPlatEosOf(p, hoy, pronto) === _dcPlatEos))
         .forEach(p => { if (si) _dcPlatSel.add(p.uid); else _dcPlatSel.delete(p.uid); });
     renderDcim();
 }
@@ -91,10 +138,13 @@ function _dcPlatsHtml() {
     }
     const puede = _dcimMay('dcim_catalog_manage');
     const q = _dcPlatQ.trim().toLowerCase();
+    const [hoy, pronto] = _dcPlatEosDays();
     const rows = (_dcPlats.rows || []).filter(
         p => (!q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0)
-             && (!_dcPlatBrand || String(p.brand_uid || '') === _dcPlatBrand));
-    return `<div class="ss-toolrow mb-2">
+             && (!_dcPlatBrand || String(p.brand_uid || '') === _dcPlatBrand)
+             && (!_dcPlatEos || _dcPlatEosOf(p, hoy, pronto) === _dcPlatEos));
+    return `<div class="ss-toolrow mb-2">${_dcPlatEosHtml(_dcPlats.rows || [])}</div>
+        <div class="ss-toolrow mb-2">
             <input class="form-control form-control-sm" style="max-width:16rem"
                    value="${escAttr(_dcPlatQ)}"
                    placeholder="${escAttr(t('dcim_plat_filter'))}"
@@ -236,7 +286,12 @@ function _dcPlatFold(clave) {
 function _dcPlatDate(p, campo, hoy) {
     const v = String(((p || {}).extra || {})[campo] || '');
     if (!v) return '';
-    return v <= hoy ? `<span class="badge bg-danger">${esc(v)}</span>` : esc(v);
+    if (v <= hoy) return `<span class="badge fw-normal bg-danger-subtle text-danger-emphasis">${esc(v)}</span>`;
+    // Y la de fin de soporte que llega en menos de seis meses, en ámbar: la misma regla que
+    // cuenta el Resumen (`_dcPlatEosOf`), para que la cifra y la tabla digan lo mismo.
+    if (campo === 'eol' && v <= _dcPlatEosDays()[1])
+        return `<span class="badge fw-normal bg-warning-subtle text-warning-emphasis">${esc(v)}</span>`;
+    return esc(v);
 }
 
 /** Cómo se llama una clase de plataforma. Sin traducir sale la palabra tal cual, que es peor

@@ -1,13 +1,7 @@
 {
     "id": "synology_smart",
-    "label": {
-        "en_EN": "Synology — SMART attributes (SYNOLOGY-SMART-MIB)",
-        "es_ES": "Synology — atributos SMART (SYNOLOGY-SMART-MIB)"
-    },
-    "description": {
-        "en_EN": "Every SMART attribute of every disk, with its current value, its worst and the manufacturer threshold. A row is named by disk AND attribute, because the same attribute exists on every disk in the box and merging them would chart one disk as all of them.",
-        "es_ES": "Cada atributo SMART de cada disco, con su valor actual, el peor y el umbral del fabricante. Una fila se nombra por disco Y atributo, porque el mismo atributo existe en todos los discos y fusionarlos graficaría uno como si fueran todos."
-    },
+    "label": {"i18n": "synology_smart/label"},
+    "description": {"i18n": "synology_smart/desc"},
     "_comment_row_split": "A row is named '<disk> / <attribute>' because index_label names two columns and the sampler joins them. Which half is the DISK is a fact about this table, so the table says it: every attribute of one disk then reads under that disk's heading instead of eighty rows sorted by attribute name across every bay.",
     "row_split": "^(?P<group>[^/]+?)\\s*/\\s*(?P<row>.+)$",
     "match": {
@@ -17,10 +11,7 @@
     "metrics": [
         {
             "key": "syno_smart_current",
-            "label": {
-                "en_EN": "Current value",
-                "es_ES": "Valor actual"
-            },
+            "label": {"i18n": "synology_smart/syno_smart_current"},
             "kind": "gauge",
             "walk": "1.3.6.1.4.1.6574.5.1.1.5",
             "chart": "line",
@@ -31,10 +22,7 @@
         },
         {
             "key": "syno_smart_worst",
-            "label": {
-                "en_EN": "Worst value",
-                "es_ES": "Peor valor"
-            },
+            "label": {"i18n": "synology_smart/syno_smart_worst"},
             "kind": "gauge",
             "walk": "1.3.6.1.4.1.6574.5.1.1.6",
             "chart": "line",
@@ -45,10 +33,7 @@
         },
         {
             "key": "syno_smart_threshold",
-            "label": {
-                "en_EN": "Threshold",
-                "es_ES": "Umbral"
-            },
+            "label": {"i18n": "synology_smart/syno_smart_threshold"},
             "kind": "gauge",
             "walk": "1.3.6.1.4.1.6574.5.1.1.7",
             "chart": "line",
@@ -59,10 +44,7 @@
         },
         {
             "key": "syno_smart_raw",
-            "label": {
-                "en_EN": "Raw value",
-                "es_ES": "Valor en bruto"
-            },
+            "label": {"i18n": "synology_smart/syno_smart_raw"},
             "kind": "gauge",
             "walk": "1.3.6.1.4.1.6574.5.1.1.10",
             "chart": "line",
@@ -73,10 +55,7 @@
         },
         {
             "key": "syno_smart_status",
-            "label": {
-                "en_EN": "Status",
-                "es_ES": "Estado"
-            },
+            "label": {"i18n": "synology_smart/syno_smart_status"},
             "kind": "text",
             "walk": "1.3.6.1.4.1.6574.5.1.1.9",
             "index_label": [
@@ -87,10 +66,7 @@
         },
         {
             "key": "syno_smart_serial",
-            "label": {
-                "en_EN": "Serial number",
-                "es_ES": "Número de serie"
-            },
+            "label": {"i18n": "synology_smart/syno_smart_serial"},
             "kind": "text",
             "walk": "1.3.6.1.4.1.6574.5.1.1.11",
             "index_label": [

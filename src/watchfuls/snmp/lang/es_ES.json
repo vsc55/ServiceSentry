@@ -4,6 +4,7 @@
     "labels": {
         "enabled": "Habilitado",
         "threads": "Hilos",
+        "simulated_interval": "Cadencia de los simulados (s)",
         "label": "Etiqueta",
         "timeout": "Timeout (s)",
         "retries": "Reintentos",
@@ -15,6 +16,7 @@
     "hints": {
         "enabled": "Activa o desactiva esta entrada.",
         "threads": "Número máximo de comprobaciones de OID en paralelo.",
+        "simulated_interval": "Segundos entre dos muestras de un dispositivo simulado (los de la demo), cada uno en su momento dentro de ese intervalo; entre medias conserva lo último que dijo. 0 = en cada ciclo.",
         "label": "Nombre que se muestra en la interfaz. Si está vacío, se usa la clave del elemento.",
         "timeout": "Segundos de espera por cada respuesta SNMP.",
         "retries": "Número de reintentos al agotar el tiempo antes de declarar fallo.",

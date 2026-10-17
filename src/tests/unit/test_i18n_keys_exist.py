@@ -49,7 +49,10 @@ def _known_keys(lang_mod) -> set:
 
     Nested groups (``labels``/``hints``/``permission_labels``…) are looked up by leaf name
     at runtime, so a leaf counts as defined."""
-    flat = _flat(lang_mod.LANG)
+    # The sections that word shipped DATA are not looked up by name (``lib.i18n.DATA_SECTIONS``),
+    # and their hundreds of leaves would vouch for a key the panel lacks.
+    from lib.i18n import DATA_SECTIONS                              # noqa: PLC0415
+    flat = _flat({k: v for k, v in lang_mod.LANG.items() if k not in DATA_SECTIONS})
     return set(flat) | {k.split('.')[-1] for k in flat}
 
 

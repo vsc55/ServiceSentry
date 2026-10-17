@@ -43,7 +43,9 @@ Per-page keys (all optional except where noted):
   (``rows`` = the section/row layout, the default; ``table`` = the generic inventory
   table) and ``action`` (a watchful action answering that view's data; declaring one
   makes the view LIVE — it asks when opened and keeps nothing).  The first view is the
-  one a bare ``/m365`` opens.
+  one a bare ``/m365`` opens.  ``perm`` (optional) is a permission this ONE view needs on
+  top of the section's: the sidebar hides it, the client never lands a reader on it and
+  the route sends a reader without it to the section.
 
 The page's **title** is the module's translated ``pretty_name``, exactly like a
 module-contributed Overview widget — no core string names a module.
@@ -100,6 +102,9 @@ def _views(d: dict) -> list:
             'label':  str(v.get('label') or ''),      # key in the MODULE's lang file
             'kind':   str(v.get('kind') or 'rows'),
             'action': str(v.get('action') or ''),     # declared → the view is live
+            # A permission this ONE view needs on top of the section's ('' = none): the
+            # sidebar hides it and the route sends a reader without it to the section.
+            'perm':   str(v.get('perm') or '').strip(),
         })
     return out if len(out) > 1 else []
 

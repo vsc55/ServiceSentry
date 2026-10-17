@@ -21,9 +21,10 @@ import copy
 import json
 import os
 import re
+import threading
 import uuid
 
-from lib.core.devices.resolve import device_uid_from_key
+from lib.core.devices.resolve import device_keys, device_uid_from_key
 from lib.core.modules.facade import mutate_modules
 from lib.security import secret_manager
 
@@ -87,6 +88,61 @@ def _row_of(skey: str, data: dict) -> str:
     return '' if detail in ('', 'metrics') else detail
 
 
+#: The candidate index of the last few result collections: ``[(obj, len, index)]``.
+_CANDIDATES: list = []
+_CANDIDATES_KEPT = 64
+#: Below this a collection is searched as it is: indexing it would cost more than it saves.
+_CANDIDATES_MIN = 64
+_CANDIDATES_LOCK = threading.Lock()
+
+
+def _candidates(keys_of) -> dict:
+    """``{base key: [(position, result key), …]}`` for one module's results (a dict) or one
+    module's history series (a list of ``{'key': …}``): every base a result key may belong to,
+    in the three shapes `build_device_status` matches (the key itself, ``<item>/<detail>``,
+    ``<item>_<suffix>``).
+
+    So a device's rows are LOOKED UP instead of searched for. The map and the device list
+    build every device's status in a loop, and each one walked the whole module: a fleet whose
+    SNMP results are seventeen thousand rows, times 356 devices, twelve million comparisons.
+    Kept for the last few collections, found by identity and size — the state of one request
+    is one dict asked about once per device."""
+    size = len(keys_of)
+    if size < _CANDIDATES_MIN:
+        return _index_candidates(keys_of)
+    with _CANDIDATES_LOCK:
+        for obj, n, index in _CANDIDATES:
+            if obj is keys_of and n == size:
+                return index
+    index = _index_candidates(keys_of)
+    with _CANDIDATES_LOCK:
+        _CANDIDATES[:] = [x for x in _CANDIDATES if x[0] is not keys_of][-(_CANDIDATES_KEPT - 1):]
+        _CANDIDATES.append((keys_of, size, index))
+    return index
+
+
+def _index_candidates(keys_of) -> dict:
+    index: dict = {}
+    items = keys_of if isinstance(keys_of, dict) else (
+        (s.get('key') if isinstance(s, dict) else None) for s in keys_of)
+    for pos, skey in enumerate(items):
+        if not isinstance(skey, str):
+            continue
+        for base in {skey, skey.split('/', 1)[0], skey.rsplit('_', 1)[0]}:
+            index.setdefault(base, []).append((pos, skey))
+    return index
+
+
+def _matching(keys_of, keys) -> list:
+    """The positions and result keys of *keys_of* that may belong to one of *keys*, in their
+    own order; `_matches` still decides which (see `_candidates`)."""
+    index = _candidates(keys_of)
+    found = set()
+    for key in keys:
+        found.update(index.get(key, ()))
+    return sorted(found)
+
+
 def build_device_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
     """Build the device modal's "Latest data" rows: for every bound item (``bound`` =
     ``{bare_module: {item_key: label}}``) merge the live value from ``status_raw`` with a
@@ -135,7 +191,8 @@ def build_device_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> lis
         if not isinstance(mod_status, dict):
             mod_status = status_raw.get(f'watchfuls.{bare}')
         if isinstance(mod_status, dict):
-            for skey, info in mod_status.items():
+            for _pos, skey in _matching(mod_status, keys):
+                info = mod_status.get(skey)
                 if not isinstance(info, dict):
                     continue
                 base = _matches(skey, keys)
@@ -157,7 +214,9 @@ def build_device_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> lis
                 })
                 covered.add(skey)
         # 2) History fallback for series with no live value.
-        for s in hist_by_mod.get(bare, []):
+        series = hist_by_mod.get(bare, [])
+        for pos, _skey in _matching(series, keys):
+            s = series[pos]
             skey = s.get('key')
             if skey in covered:
                 continue
@@ -504,12 +563,35 @@ def _apply_check_cred(wa, fields):
     return apply_credential(fields, cred)
 
 
+#: ``(configuration, version, {uid: grouped})`` of the last configuration indexed.
+_CHECKS_BY_DEVICE: list = [None]
+
+
 def _checks_for_device(wa, uid):
     """Grouped ``{(bare_module, collection): {key: item}}`` for every check in the module
-    configuration bound to *uid* (used when the client doesn't send the list)."""
-    modules = wa._load_modules()
-    grouped = {}
-    for mod_key, mod_cfg in modules.items():
+    configuration bound to *uid* (used when the client doesn't send the list).
+
+    The map and the device pages ask this once per device, and each call was a deep copy of
+    the WHOLE configuration —40 ms on a demo-sized one, fifteen seconds of a map of 356
+    devices— to read the few items of one. With the panel's own configuration (the database-
+    backed facade) the whole configuration is grouped by device once per version, and what is
+    handed out is a copy of that device's checks only, as free to mutate as before."""
+    from lib.core.modules.facade import DbBackedModules           # noqa: PLC0415
+    facade = getattr(wa, '_modules_facade', None)
+    if isinstance(facade, DbBackedModules):
+        data = facade.reload_if_changed()
+        memo = _CHECKS_BY_DEVICE[0]
+        if memo is None or memo[0] is not data or memo[1] != facade.loaded_version:
+            memo = (data, facade.loaded_version, _group_by_device(data))
+            _CHECKS_BY_DEVICE[0] = memo
+        return copy.deepcopy(memo[2].get(uid) or {})
+    return _group_by_device(wa._load_modules()).get(uid) or {}
+
+
+def _group_by_device(modules) -> dict:
+    """``{uid: {(bare_module, collection): {key: item}}}`` of a module configuration."""
+    out: dict = {}
+    for mod_key, mod_cfg in (modules or {}).items():
         if not isinstance(mod_cfg, dict):
             continue
         bare = _bare(mod_key)
@@ -519,9 +601,10 @@ def _checks_for_device(wa, uid):
             if coll.startswith('__') or not isinstance(items, dict):
                 continue
             for key, item in items.items():
-                if isinstance(item, dict) and item.get('device_uid') == uid:
-                    grouped.setdefault((bare, coll), {})[key] = item
-    return grouped
+                if isinstance(item, dict) and isinstance(item.get('device_uid'), str)                         and item['device_uid']:
+                    out.setdefault(item['device_uid'], {}).setdefault(
+                        (bare, coll), {})[key] = item
+    return out
 
 
 def device_recorded_keys(series: list, uid: str) -> dict:
@@ -574,16 +657,12 @@ def device_sampled_keys(status_raw: dict, uid: str) -> dict:
     out: dict = {}
     if not uid or not isinstance(status_raw, dict):
         return out
-    for mod_key, mod_status in status_raw.items():
-        if not isinstance(mod_status, dict):
-            continue
-        bare = _bare(str(mod_key))
-        for res_key in mod_status:
-            if device_uid_from_key(res_key) != uid:
-                continue
-            # The base key, not the row: `build_device_status` maps `<base>/<row>` back to it,
-            # which is what makes one entry stand for a device's whole table.
-            out.setdefault(bare, {})[str(res_key).split('/', 1)[0]] = ''
+    # The fleet's index of the same state, built once (`device_keys`): this is asked once per
+    # device by the map and the device list, and each time scanned every result there is.
+    for mod_key, res_key in device_keys(status_raw).get(uid, ()):
+        # The base key, not the row: `build_device_status` maps `<base>/<row>` back to it,
+        # which is what makes one entry stand for a device's whole table.
+        out.setdefault(_bare(str(mod_key)), {})[str(res_key).split('/', 1)[0]] = ''
     return out
 
 

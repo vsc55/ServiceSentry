@@ -3936,9 +3936,14 @@ class TestModelosYPlantillasSonDelCatalogo:
         dcim = reg[reg.index("'id': 'dcim'"):]
         dcim = dcim[:dcim.index("'id': 'history'")]
         assert "'slug': 'catalog'" not in dcim and "'slug': 'builds'" not in dcim
-        for uid in ('models', 'builds'):
-            fila = reg.split("{'id': '%s'" % uid, 1)[1].split('},', 1)[0]
-            assert "'group': 'catalog'" in fila, uid
+        # Las plantillas, una entrada del grupo; la biblioteca, una página declarada EN el grupo,
+        # con sus vistas (resumen, marcas, modelos…) — ver `test_wa_dcim_library_nav.py`.
+        fila = reg.split("{'id': 'builds'", 1)[1].split('},', 1)[0]
+        assert "'group': 'catalog'" in fila
+        from lib.web_admin.constants import standalone_page
+        lib = standalone_page('models')
+        assert lib and lib['standalone']['placement'] == 'catalog'
+        assert lib['standalone']['pane'] == 'tab-models'
 
     def test_cada_una_tiene_su_panel(self):
         pane = _read(os.path.join(DCIM, '_pane.html'))
@@ -3968,12 +3973,18 @@ class TestModelosYPlantillasSonDelCatalogo:
     def test_se_abren_al_mostrarse_y_las_ve_quien_puede_leerlas(self):
         base = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'init')
         wiring = _read(os.path.join(base, '_wiring.html'))
-        for b in ('btn-tab-models', 'btn-tab-builds'):
-            cuerpo = wiring.split(f"getElementById('{b}')", 1)[1].split(';', 1)[0]
-            assert 'renderDcim()' in cuerpo, b
+        cuerpo = wiring.split("getElementById('btn-tab-builds')", 1)[1].split(';', 1)[0]
+        assert 'renderDcim()' in cuerpo
         feats = _read(os.path.join(base, '_table_features.html'))
-        assert "modelsLi.style.display = perms.has('dcim_catalog_view')" in feats
         assert "buildsLi.style.display = perms.has('dcim_view')" in feats
+        # La biblioteca es una página declarada: la abre su `render` desde el bucle del registro
+        # —el mismo que abre cualquier sección con vistas— y su entrada la revela su permiso
+        # (`data-nav-perm`), no una línea escrita para ella.
+        from lib.web_admin.constants import standalone_page
+        sa = standalone_page('models')['standalone']
+        assert sa['render'] == 'renderDcLibrary' and sa['perm'] == 'dcim_catalog_view'
+        assert "getElementById('btn-tab-models')" not in wiring, 'wired twice'
+        assert 'modelsLi' not in feats
 
 
 class TestDeshacerEnLosPlanos:

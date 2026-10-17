@@ -100,6 +100,34 @@ HOME_PAGES = (
                         # sección es uno que las demás no pueden usar sin nombrarla. Ahora es
                         # del core y se declara sola (`lib/core/orgs/manifest.py::PAGE`).
                     )}},
+    # The equipment library — brands, models, platforms, connectors and the import schemas —
+    # in the Catalogue group (`placement`), as a page with VIEWS rather than a tab with a row
+    # of in-page tabs: each view is an address of its own (`/catalog/library/brands`), the
+    # sidebar unfolds them, and «Library» reopens the one used last. The id stays `models`,
+    # which is what the reader's saved menu order (`t:models`) and the pane already say.
+    #
+    # `perm` on a view narrows that view further than the section: the import schemas are a
+    # manager's document, and a reader of the library is not offered them — not by the sidebar
+    # and not by the route.
+    {'id': 'models',   'url': '/catalog/library', 'label_key': 'tab_models',
+     'standalone': {'pane': 'tab-models', 'render': 'renderDcLibrary',
+                    'perm': 'dcim_catalog_view', 'icon': 'bi-journal-text',
+                    'placement': 'catalog', 'nav_label_key': 'tab_models',
+                    'views': (
+                        {'slug': 'summary', 'icon': 'bi-clipboard-data', 'kind': '',
+                         'action': '', 'label_key': 'dcim_lib_v_summary'},
+                        {'slug': 'brands', 'icon': 'bi-tags', 'kind': '', 'action': '',
+                         'label_key': 'dcim_cat_tab_brands'},
+                        {'slug': 'models', 'icon': 'bi-list-ul', 'kind': '', 'action': '',
+                         'label_key': 'dcim_cat_tab_list'},
+                        {'slug': 'platforms', 'icon': 'bi-disc', 'kind': '', 'action': '',
+                         'label_key': 'dcim_cat_tab_platforms'},
+                        {'slug': 'connectors', 'icon': 'bi-plug', 'kind': '', 'action': '',
+                         'label_key': 'dcim_cat_tab_conns'},
+                        {'slug': 'schemas', 'icon': 'bi-diagram-2', 'kind': '', 'action': '',
+                         'label_key': 'dcim_cat_tab_schemas',
+                         'perm': 'dcim_catalog_manage'},
+                    )}},
     {'id': 'history',  'url': '/history',  'label_key': 'landing_history',
      'standalone': {'pane': 'tab-history', 'render': 'renderHistory',
                     'perm': 'history_view', 'icon': 'bi-graph-up',
@@ -142,13 +170,10 @@ PANEL_TABS = (
      'group': 'catalog'},
     {'id': 'clusters',    'icon': 'bi-diagram-3',        'label_key': 'subtab_clusters',
      'group': 'catalog'},
-    # The models of equipment and the purchase templates built from them. Views of the physical
-    # inventory until it was clear they are reference data: what can be bought and what is
-    # actually bought, consulted from every rack and every device rather than being a place in
-    # the building. Their code is still the inventory's and draws through `renderDcim`, which
-    # paints whichever of the three panes is on screen.
-    {'id': 'models',      'icon': 'bi-journal-text',     'label_key': 'tab_models',
-     'group': 'catalog'},
+    # The models of equipment are not a tab here any more: the library is a declared page with
+    # views of its own (`HOME_PAGES`, id `models`), placed in this same group. The purchase
+    # templates built from them stay a plain entry. Both draw through `renderDcim`, which
+    # paints whichever of the inventory's panes is on screen.
     {'id': 'builds',      'icon': 'bi-boxes',            'label_key': 'tab_dcim_builds',
      'group': 'catalog'},
     {'id': 'credentials', 'icon': 'bi-key',              'label_key': 'tab_credentials',

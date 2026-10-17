@@ -1,0 +1,474 @@
+{
+  "id": "ups_mib",
+  "label": {"i18n": "ups_mib/label"},
+  "short_label": {"i18n": "ups_mib/short"},
+  "description": {"i18n": "ups_mib/desc"},
+  "match": {
+    "probe": "1.3.6.1.2.1.33.1.1.2.0"
+  },
+  "metrics": [
+    {
+      "key": "ups_manufacturer",
+      "label": {"i18n": "ups_mib/ups_manufacturer"},
+      "oid": "1.3.6.1.2.1.33.1.1.1.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "vendor_reported"
+    },
+    {
+      "key": "ups_model",
+      "label": {"i18n": "ups_mib/ups_model"},
+      "oid": "1.3.6.1.2.1.33.1.1.2.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "model"
+    },
+    {
+      "key": "ups_firmware",
+      "label": {"i18n": "ups_mib/ups_firmware"},
+      "oid": "1.3.6.1.2.1.33.1.1.3.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "firmware"
+    },
+    {
+      "key": "ups_agent_version",
+      "label": {"i18n": "ups_mib/ups_agent_version"},
+      "oid": "1.3.6.1.2.1.33.1.1.4.0",
+      "kind": "text",
+      "chart": "none"
+    },
+    {
+      "key": "ups_ident_name",
+      "label": {"i18n": "ups_mib/ups_ident_name"},
+      "oid": "1.3.6.1.2.1.33.1.1.5.0",
+      "kind": "text",
+      "chart": "none"
+    },
+    {
+      "key": "ups_attached",
+      "label": {"i18n": "ups_mib/ups_attached"},
+      "oid": "1.3.6.1.2.1.33.1.1.6.0",
+      "kind": "text",
+      "chart": "none"
+    },
+    {
+      "key": "ups_battery_status",
+      "icon": "bi-battery-half",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_battery_status"},
+      "oid": "1.3.6.1.2.1.33.1.2.1.0",
+      "kind": "gauge",
+      "chart": "value",
+      "states": {
+        "1": {
+          "label": {"i18n": "ups_mib/ups_battery_status/1"},
+          "level": "info"
+        },
+        "2": {
+          "label": {"i18n": "ups_mib/ups_battery_status/2"},
+          "level": "ok"
+        },
+        "3": {
+          "label": {"i18n": "ups_mib/ups_battery_status/3"},
+          "level": "warn"
+        },
+        "4": {
+          "label": {"i18n": "ups_mib/ups_battery_status/4"},
+          "level": "bad"
+        }
+      }
+    },
+    {
+      "key": "ups_on_battery",
+      "label": {"i18n": "ups_mib/ups_on_battery"},
+      "oid": "1.3.6.1.2.1.33.1.2.2.0",
+      "kind": "gauge",
+      "unit": "s",
+      "chart": "area"
+    },
+    {
+      "key": "ups_runtime",
+      "icon": "bi-hourglass-split",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_runtime"},
+      "oid": "1.3.6.1.2.1.33.1.2.3.0",
+      "kind": "gauge",
+      "unit": "min",
+      "chart": "line"
+    },
+    {
+      "key": "ups_charge",
+      "icon": "bi-battery-charging",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_charge"},
+      "oid": "1.3.6.1.2.1.33.1.2.4.0",
+      "kind": "gauge",
+      "unit": "%",
+      "chart": "line"
+    },
+    {
+      "key": "ups_battery_voltage",
+      "label": {"i18n": "ups_mib/ups_battery_voltage"},
+      "oid": "1.3.6.1.2.1.33.1.2.5.0",
+      "kind": "gauge",
+      "unit": "V",
+      "scale": 0.1,
+      "chart": "line"
+    },
+    {
+      "key": "ups_battery_current",
+      "label": {"i18n": "ups_mib/ups_battery_current"},
+      "oid": "1.3.6.1.2.1.33.1.2.6.0",
+      "kind": "gauge",
+      "unit": "A",
+      "scale": 0.1,
+      "chart": "line"
+    },
+    {
+      "key": "ups_battery_temp",
+      "icon": "bi-thermometer-half",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_battery_temp"},
+      "oid": "1.3.6.1.2.1.33.1.2.7.0",
+      "kind": "gauge",
+      "unit": "°C",
+      "chart": "line"
+    },
+    {
+      "key": "ups_input_bads",
+      "label": {"i18n": "ups_mib/ups_input_bads"},
+      "oid": "1.3.6.1.2.1.33.1.3.1.0",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "ups_input_lines",
+      "label": {"i18n": "ups_mib/ups_input_lines"},
+      "oid": "1.3.6.1.2.1.33.1.3.2.0",
+      "kind": "gauge",
+      "chart": "none"
+    },
+    {
+      "key": "ups_output_source",
+      "icon": "bi-plug",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_output_source"},
+      "oid": "1.3.6.1.2.1.33.1.4.1.0",
+      "kind": "gauge",
+      "chart": "value",
+      "states": {
+        "1": {
+          "label": {"i18n": "ups_mib/ups_output_source/1"},
+          "level": "info"
+        },
+        "2": {
+          "label": {"i18n": "ups_mib/ups_output_source/2"},
+          "level": "bad"
+        },
+        "3": {
+          "label": {"i18n": "ups_mib/ups_output_source/3"},
+          "level": "ok"
+        },
+        "4": {
+          "label": {"i18n": "ups_mib/ups_output_source/4"},
+          "level": "warn"
+        },
+        "5": {
+          "label": {"i18n": "ups_mib/ups_output_source/5"},
+          "level": "warn"
+        },
+        "6": {
+          "label": {"i18n": "ups_mib/ups_output_source/6"},
+          "level": "warn"
+        },
+        "7": {
+          "label": {"i18n": "ups_mib/ups_output_source/7"},
+          "level": "warn"
+        }
+      }
+    },
+    {
+      "key": "ups_output_frequency",
+      "label": {"i18n": "ups_mib/ups_output_frequency"},
+      "oid": "1.3.6.1.2.1.33.1.4.2.0",
+      "kind": "gauge",
+      "unit": "Hz",
+      "scale": 0.1,
+      "chart": "line"
+    },
+    {
+      "key": "ups_output_lines",
+      "label": {"i18n": "ups_mib/ups_output_lines"},
+      "oid": "1.3.6.1.2.1.33.1.4.3.0",
+      "kind": "gauge",
+      "chart": "none"
+    },
+    {
+      "key": "ups_alarms_present",
+      "icon": "bi-bell",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_alarms_present"},
+      "oid": "1.3.6.1.2.1.33.1.6.1.0",
+      "kind": "gauge",
+      "chart": "value",
+      "states": {
+        "0": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/0"},
+          "level": "ok"
+        },
+        "1": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/1"},
+          "level": "warn"
+        },
+        "2": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/2"},
+          "level": "warn"
+        },
+        "3": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/3"},
+          "level": "warn"
+        },
+        "4": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/4"},
+          "level": "warn"
+        },
+        "5": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/5"},
+          "level": "warn"
+        },
+        "6": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/6"},
+          "level": "warn"
+        },
+        "7": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/7"},
+          "level": "warn"
+        },
+        "8": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/8"},
+          "level": "warn"
+        },
+        "9": {
+          "label": {"i18n": "ups_mib/ups_alarms_present/9"},
+          "level": "warn"
+        }
+      }
+    },
+    {
+      "key": "ups_rated_va",
+      "label": {"i18n": "ups_mib/ups_rated_va"},
+      "oid": "1.3.6.1.2.1.33.1.9.5.0",
+      "kind": "gauge",
+      "unit": "VA",
+      "chart": "none"
+    },
+    {
+      "key": "ups_rated_power",
+      "label": {"i18n": "ups_mib/ups_rated_power"},
+      "oid": "1.3.6.1.2.1.33.1.9.6.0",
+      "kind": "gauge",
+      "unit": "W",
+      "chart": "none"
+    },
+    {
+      "key": "ups_in_frequency",
+      "label": {"i18n": "ups_mib/ups_in_frequency"},
+      "walk": "1.3.6.1.2.1.33.1.3.3.1.2",
+      "index_label": "1.3.6.1.2.1.33.1.3.3.1.1",
+      "kind": "gauge",
+      "unit": "Hz",
+      "scale": 0.1,
+      "chart": "line"
+    },
+    {
+      "key": "ups_in_voltage",
+      "icon": "bi-lightning",
+      "label": {"i18n": "ups_mib/ups_in_voltage"},
+      "walk": "1.3.6.1.2.1.33.1.3.3.1.3",
+      "index_label": "1.3.6.1.2.1.33.1.3.3.1.1",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "ups_in_current",
+      "label": {"i18n": "ups_mib/ups_in_current"},
+      "walk": "1.3.6.1.2.1.33.1.3.3.1.4",
+      "index_label": "1.3.6.1.2.1.33.1.3.3.1.1",
+      "kind": "gauge",
+      "unit": "A",
+      "scale": 0.1,
+      "chart": "line"
+    },
+    {
+      "key": "ups_in_power",
+      "label": {"i18n": "ups_mib/ups_in_power"},
+      "walk": "1.3.6.1.2.1.33.1.3.3.1.5",
+      "index_label": "1.3.6.1.2.1.33.1.3.3.1.1",
+      "kind": "gauge",
+      "unit": "W",
+      "chart": "line"
+    },
+    {
+      "key": "ups_out_voltage",
+      "label": {"i18n": "ups_mib/ups_out_voltage"},
+      "walk": "1.3.6.1.2.1.33.1.4.4.1.2",
+      "index_label": "1.3.6.1.2.1.33.1.4.4.1.1",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "ups_out_current",
+      "label": {"i18n": "ups_mib/ups_out_current"},
+      "walk": "1.3.6.1.2.1.33.1.4.4.1.3",
+      "index_label": "1.3.6.1.2.1.33.1.4.4.1.1",
+      "kind": "gauge",
+      "unit": "A",
+      "scale": 0.1,
+      "chart": "line"
+    },
+    {
+      "key": "ups_out_power",
+      "label": {"i18n": "ups_mib/ups_out_power"},
+      "walk": "1.3.6.1.2.1.33.1.4.4.1.4",
+      "index_label": "1.3.6.1.2.1.33.1.4.4.1.1",
+      "kind": "gauge",
+      "unit": "W",
+      "chart": "area"
+    },
+    {
+      "key": "ups_out_load",
+      "icon": "bi-speedometer2",
+      "headline": true,
+      "label": {"i18n": "ups_mib/ups_out_load"},
+      "walk": "1.3.6.1.2.1.33.1.4.4.1.5",
+      "index_label": "1.3.6.1.2.1.33.1.4.4.1.1",
+      "kind": "gauge",
+      "unit": "%",
+      "chart": "area"
+    },
+    {
+      "key": "ups_bypass_voltage",
+      "label": {"i18n": "ups_mib/ups_bypass_voltage"},
+      "walk": "1.3.6.1.2.1.33.1.5.3.1.2",
+      "index_label": "1.3.6.1.2.1.33.1.5.3.1.1",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "ups_alarm",
+      "icon": "bi-bell",
+      "tally": "all",
+      "label": {"i18n": "ups_mib/ups_alarm"},
+      "walk": "1.3.6.1.2.1.33.1.6.2.1.2",
+      "group": "ups_alarm",
+      "kind": "text",
+      "chart": "none",
+      "path": {
+        "sep": ".",
+        "value": -1
+      },
+      "states": {
+        "1": {
+          "label": {"i18n": "ups_mib/ups_alarm/1"},
+          "level": "bad"
+        },
+        "2": {
+          "label": {"i18n": "ups_mib/ups_alarm/2"},
+          "level": "warn"
+        },
+        "3": {
+          "label": {"i18n": "ups_mib/ups_alarm/3"},
+          "level": "warn"
+        },
+        "4": {
+          "label": {"i18n": "ups_mib/ups_alarm/4"},
+          "level": "bad"
+        },
+        "5": {
+          "label": {"i18n": "ups_mib/ups_alarm/5"},
+          "level": "warn"
+        },
+        "6": {
+          "label": {"i18n": "ups_mib/ups_alarm/6"},
+          "level": "warn"
+        },
+        "7": {
+          "label": {"i18n": "ups_mib/ups_alarm/7"},
+          "level": "bad"
+        },
+        "8": {
+          "label": {"i18n": "ups_mib/ups_alarm/8"},
+          "level": "bad"
+        },
+        "9": {
+          "label": {"i18n": "ups_mib/ups_alarm/9"},
+          "level": "warn"
+        },
+        "10": {
+          "label": {"i18n": "ups_mib/ups_alarm/10"},
+          "level": "warn"
+        },
+        "11": {
+          "label": {"i18n": "ups_mib/ups_alarm/11"},
+          "level": "info"
+        },
+        "12": {
+          "label": {"i18n": "ups_mib/ups_alarm/12"},
+          "level": "info"
+        },
+        "13": {
+          "label": {"i18n": "ups_mib/ups_alarm/13"},
+          "level": "bad"
+        },
+        "14": {
+          "label": {"i18n": "ups_mib/ups_alarm/14"},
+          "level": "bad"
+        },
+        "15": {
+          "label": {"i18n": "ups_mib/ups_alarm/15"},
+          "level": "bad"
+        },
+        "16": {
+          "label": {"i18n": "ups_mib/ups_alarm/16"},
+          "level": "bad"
+        },
+        "17": {
+          "label": {"i18n": "ups_mib/ups_alarm/17"},
+          "level": "bad"
+        },
+        "18": {
+          "label": {"i18n": "ups_mib/ups_alarm/18"},
+          "level": "bad"
+        },
+        "19": {
+          "label": {"i18n": "ups_mib/ups_alarm/19"},
+          "level": "bad"
+        },
+        "20": {
+          "label": {"i18n": "ups_mib/ups_alarm/20"},
+          "level": "bad"
+        },
+        "21": {
+          "label": {"i18n": "ups_mib/ups_alarm/21"},
+          "level": "warn"
+        },
+        "22": {
+          "label": {"i18n": "ups_mib/ups_alarm/22"},
+          "level": "warn"
+        },
+        "23": {
+          "label": {"i18n": "ups_mib/ups_alarm/23"},
+          "level": "bad"
+        },
+        "24": {
+          "label": {"i18n": "ups_mib/ups_alarm/24"},
+          "level": "info"
+        }
+      }
+    }
+  ]
+}

@@ -1653,7 +1653,8 @@ anterior.*
       fila. Donde no hay UNA fecha honesta —el canal anual de Windows 11 marca una por versión—
       no se pone ninguna y se dice por qué
 - [x] **El JSON de básicos se relee cuando cambia** y **habla los dos idiomas**: un texto puede
-      ser una cadena o `{"es_ES": …, "en_EN": …}`, y se elige idioma **al sembrar** porque lo que
+      ser una cadena o una clave `{"i18n": …}` de los ficheros de idioma del core (antes, un
+      `{"es_ES": …, "en_EN": …}` en el propio JSON), y se elige idioma **al sembrar** porque lo que
       sale de ahí se copia a una fila que sobrevive a la sesión. El slug no sigue al idioma —es
       la identidad— así que sembrar en castellano y en inglés no crea dos catálogos
 - [x] **Dos cosas en un mismo U.** La rejilla daba por hecho un elemento por U y eso deja fuera

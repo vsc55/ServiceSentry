@@ -570,6 +570,25 @@ class BuildStore:
             "WHERE platform_uid <> '' GROUP BY platform_uid") or ()
         return {str(r[0]): int(r[1]) for r in rows}
 
+    def type_counts(self) -> dict:
+        """``{type_uid: n}`` — in how many templates each catalogue model appears, as the
+        chassis or as one of the parts. Counted once per template: a template with eight of the
+        same DIMM names that DIMM once.
+
+        Two reads over plain columns, which read the same on the three engines. It is
+        what lets the library say «never placed nor in a template» without a query per model.
+        """
+        por: dict = {}
+        for r in (self._db.fetchall(
+                f'SELECT type_uid, uid FROM {self.builds._sql_table} '
+                "WHERE type_uid <> ''") or ()):
+            por.setdefault(str(r[0]), set()).add(str(r[1]))
+        for r in (self._db.fetchall(
+                f'SELECT type_uid, build_uid FROM {self.parts._sql_table} '
+                "WHERE type_uid <> '' GROUP BY type_uid, build_uid") or ()):
+            por.setdefault(str(r[0]), set()).add(str(r[1]))
+        return {k: len(v) for k, v in por.items()}
+
     def parts_of(self, build_uid: str) -> list[dict]:
         """Las piezas de una, por clase y bahía — que es como se buscan: «los discos», «la 3»."""
         filas = self.parts.list('build_uid = ?', (str(build_uid or ''),))

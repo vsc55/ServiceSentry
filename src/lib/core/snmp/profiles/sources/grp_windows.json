@@ -1,13 +1,7 @@
 {
   "id": "grp_windows",
-  "label": {
-    "en_EN": "Windows (base)",
-    "es_ES": "Windows (base)"
-  },
-  "description": {
-    "en_EN": "What every Windows answers, whatever it is for: system, interfaces and the IP, TCP/UDP and ICMP counters; processors, memory and volumes through HOST-RESOURCES-MIB; and the domain, the SMB network I/O and the state of its services through the LAN Manager MIB. The two roles below hold this and add what only they have.",
-    "es_ES": "Lo que contesta cualquier Windows, sea para lo que sea: sistema, interfaces y los contadores IP, TCP/UDP e ICMP; procesadores, memoria y volumenes por HOST-RESOURCES-MIB; y el dominio, la E/S de red SMB y el estado de sus servicios por la MIB de LAN Manager. Los dos papeles de abajo contienen este y anaden lo que solo ellos tienen."
-  },
+  "label": {"i18n": "grp_windows/label"},
+  "description": {"i18n": "grp_windows/desc"},
   "includes": [
     "windows_lm",
     "hr_system",

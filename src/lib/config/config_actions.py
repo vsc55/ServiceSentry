@@ -55,6 +55,11 @@ and a terrible button: the card has said all of that, so the button only has to 
 ("Borrar", "Vaciar"). Falls back to ``label_key``, which is what the single-row layout needs
 and what an action with nothing around it should keep saying.
 
+``status_fn`` (optional) names a global JS function that is handed an element of the card,
+under its description, to say how things stand now —«installed: version 2»—; the panel calls it
+when the card is drawn. It may add its own buttons there (an «Update» that only makes sense
+sometimes).
+
 Variants are SOLID Bootstrap names (``primary``/``secondary``/``warning``…) — outline
 variants are not used in this UI.
 """
@@ -66,7 +71,7 @@ _PKG_ROOTS = ('lib.providers', 'lib.services', 'lib.core')
 
 _ALLOWED = ('section', 'id', 'label_key', 'tooltip_key', 'icon', 'variant',
             'order', 'fn', 'show_when', 'group_label_key', 'desc_key', 'button_key',
-            'perm')
+            'perm', 'status_fn')
 
 
 def _normalize(raw) -> dict | None:

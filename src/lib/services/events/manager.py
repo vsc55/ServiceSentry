@@ -38,6 +38,11 @@ import time
 from lib.debug import DebugLevel
 from lib.services.events.rules_logic import regex_is_unsafe
 
+def _is_simulated_line(ctx) -> bool:
+    from lib.modules.simulated import SYSLOG_MSGID          # noqa: PLC0415
+    return isinstance(ctx, dict) and str(ctx.get('msgid') or '') == SYSLOG_MSGID
+
+
 #: How much of a field a rule's regex is run against (chars). Syslog text is the sender's.
 REGEX_MAX_TEXT = 4096
 
@@ -382,6 +387,11 @@ class _EventsMixin:
         match (honouring each rule's per-rule cooldown).  Never raises.
 
         *log_source* is the external syslog source the row came from (``''`` = internal)."""
+        if source == 'syslog' and _is_simulated_line(ctx):
+            # A simulated device's log line (a demonstration's): on screen like any other,
+            # never a rule's match — a rule notifies channels, and nobody is paged for a site
+            # that does not exist.
+            return
         try:
             rules = self._events_rules()
             if not rules:

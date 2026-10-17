@@ -162,9 +162,7 @@ function _dcimRenderApart(cual) {
     if (!pane) return;
     if (cual === 'models') {
         if (!_dcCat) return _dcCatOpen();
-        pane.innerHTML = _dcCatHtml();
-        if (typeof _dcBrandsMount === 'function') _dcBrandsMount();     // Marcas: su tabla
-        return;
+        return _dcLibDraw(pane);        // la biblioteca y lo que cuelga de ella: `_library.html`
     }
     if (!_dcBuilds) return _dcBuildsOpen();
     pane.innerHTML = _dcBuildsHtml();
@@ -181,7 +179,10 @@ async function renderDcim() {
     if (aparte) return _dcimRenderApart(aparte);
     const movido = _DCIM_MOVED_VIEWS[window.location.pathname];
     if (movido && typeof _navTab === 'function') {
-        history.replaceState({pane: movido.slice(1)}, '', '/admin?tab=' + movido.slice(5));
+        // Con su consulta, que dice a qué vista de la biblioteca ir (`_dcLibMigrate`).
+        const destino = _sbPageUrl(movido.slice(5));
+        history.replaceState({pane: movido.slice(1)}, '', destino
+            ? destino + window.location.search : '/admin?tab=' + movido.slice(5));
         return _navTab(movido);
     }
     const pane = document.getElementById('dcim-container');
@@ -189,7 +190,6 @@ async function renderDcim() {
     // En el inventario no hay catálogo ni plantillas: son otras entradas del menú. Lo que
     // quedara abierto de ellos se olvida aquí, y al volver a su entrada se vuelve a pedir.
     _dcCat = null;
-    _dcCatJob = '';
     _dcBuilds = null;
     _dcBuild = null;
     // Only on the FIRST render: after that the variables are the answer, and re-reading the URL
@@ -391,7 +391,6 @@ function _dcimGo(donde) {
     if (donde === 'builds') return _navTab('#tab-builds');
     _dcimMark(donde);
     _dcCat = null;
-    _dcCatJob = '';
     _dcBuilds = null;
     _dcBuild = null;
     _dcSrc = null;

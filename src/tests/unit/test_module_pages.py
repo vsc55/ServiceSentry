@@ -59,6 +59,16 @@ class TestNormalize:
         assert _page_spec('mymod', 'nope') is None
         assert _page_spec('mymod', None) is None
 
+    def test_a_view_may_ask_for_a_permission_of_its_own(self):
+        """A section's views share its permission; ONE of them may narrow it further (a
+        manager's document beside the readers' views). Declared, it travels with the view;
+        not declared, the view asks for nothing more — and a stray value is not invented."""
+        spec = _page_spec('mymod', {'views': [
+            {'slug': 'read', 'icon': 'bi-eye'},
+            {'slug': 'manage', 'icon': 'bi-gear', 'perm': ' modules_edit '}]})
+        perms = {v['slug']: v['perm'] for v in spec['views']}
+        assert perms == {'read': '', 'manage': 'modules_edit'}
+
 
 class TestDiscovery:
 

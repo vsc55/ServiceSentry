@@ -24,9 +24,10 @@ _TABLES = ('dc_site', 'dc_floor', 'dc_floor_wall', 'dc_room', 'dc_rack', 'dc_ite
 #: The drawings of the catalogue's branded basics (the access control the demo brings in):
 #: the core catalogue's, not the demo's, so they stay when the demo goes.
 _CORE = len([f for f in os.listdir(dcim_basics.FACES_DIR) if f.endswith('.svg')])
-#: The files the demo leaves: a plan per floor, the faces of its own models, and those drawings.
-_FILES = len(demo._FLOORS) + sum(1 for k in demo_faces.MODELS
-                                  for side in ('front', 'rear') if demo_faces.face(k, side)) + _CORE
+#: The files the demo leaves: a plan per floor, the faces and inside views of its own models of
+#: every tree, the front and rear its templates copy from their model, and those drawings.
+_FILES = (len(demo._FLOORS) + sum(len(demo_faces.files_of(k)) for k in demo_faces.every())
+          + 2 * len(demo.BUILDS) + _CORE)
 
 
 @pytest.fixture()
@@ -191,22 +192,31 @@ class TestWhatTheDemoHolds:
 
     def test_its_pictures_are_files_of_the_size_their_model_says(self):
         """The faces are SVG files in the repository, so they can be looked at and versioned.
-        Each one is as wide as its model (19 inches, or the mini PC's 177 mm) and as tall as its
-        U, in millimetres — the scale the port positions in `demo_faces` are written in."""
+        A device is as wide as its model (19 inches, the mini PC's 177 mm, a 0U strip's 56 mm,
+        a desk's PC its own) and as tall as its U or its own height; a cabinet is its outer
+        width by its outer height — in millimetres, the scale the port positions in
+        `demo_faces` are written in."""
         import re
-        sin = [k for k in demo_faces.MODELS if not demo_faces.face(k, 'front')]
+        sin = [k for k in demo_faces.every() if not demo_faces.face(k, 'front')]
         assert not sin, sin
         nombres = set(os.listdir(demo_faces.FACES_DIR))
-        esperados = {'%s.%s.svg' % (k, s) for k in demo_faces.MODELS for s in ('front', 'rear')
-                     if demo_faces.face(k, s)}
+        esperados = {f for k in demo_faces.every() for f in demo_faces.files_of(k)}
         assert nombres == esperados                      # no stray file nobody reads
         for nombre in sorted(nombres):
             key = nombre.split('.')[0]
+            if nombre.split('.')[1] not in ('front', 'rear'):
+                continue                                 # an inside view: its own size
             svg = demo_faces.face(key, nombre.split('.')[1])
             caja = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg)
-            ancho = demo_faces.WIDTH_MM.get(key, 482.6)
-            alto = demo_faces.MODELS[key][2] * 44.45
-            assert caja and abs(float(caja.group(1)) - ancho) < 0.01, nombre
+            assert caja, nombre
+            if key in demo_faces.RACKS:
+                _n, _u, ancho, _f, alto, _ff = demo_faces.RACKS[key]
+            elif key in demo_faces.MODELS:
+                ancho = demo_faces.WIDTH_MM.get(key, 482.6)
+                alto = demo_faces.HEIGHT_MM.get(key, demo_faces.MODELS[key][2] * 44.45)
+            else:
+                continue                                 # a module or a component: its own
+            assert abs(float(caja.group(1)) - ancho) < 0.01, nombre
             assert abs(float(caja.group(2)) - alto) < 0.01, nombre
 
     def test_outlets_follow_the_u_they_feed(self, built):
@@ -547,11 +557,9 @@ class TestItsWords:
     def test_every_language_says_the_same_things(self):
         """A key missing from a translation falls back to Spanish in the middle of an English
         demo; one extra is a word nobody uses."""
-        import glob
-        import json
-        files = glob.glob(os.path.join(demo.TEXTS_DIR, '*.json'))
-        keys = {os.path.basename(p): set(json.load(open(p, encoding='utf-8'))) for p in files}
-        assert len(keys) >= 2
+        from lib.i18n import TRANSLATIONS                           # noqa: PLC0415
+        keys = {lang: set(table.get(demo.WORDS) or {}) for lang, table in TRANSLATIONS.items()}
+        assert len(keys) >= 2 and all(keys.values())
         assert len({frozenset(k) for k in keys.values()}) == 1, keys
 
     def test_built_in_english_and_removed_from_any_language(self, tmp_path):

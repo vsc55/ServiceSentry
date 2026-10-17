@@ -170,8 +170,10 @@ createListTable({
     title: () => `${esc(t('tab_infra'))} (${_infraDevices.length})`,
     columns: _INFRA_COLS, defaultVisible: _INFRA_DEFAULT_COLS,
     persist: true, clearLabelKey: 'tab_infra',
-    persistExtra: () => ({ view: _infraView.id() }),
-    applyExtra: cfg => _infraView.apply(cfg && cfg.view),
+    // …and which sites each network map keeps open, which is part of how somebody reads this
+    // list and follows them like its columns do (see `_netgraph.html`).
+    persistExtra: () => ({ view: _infraView.id(), net: ssNetFoldSaved() }),
+    applyExtra: cfg => { _infraView.apply(cfg && cfg.view); ssNetFoldApply(cfg && cfg.net); },
     filters: {
         fields: [
             { key: 'q',     label: () => t('col_device_name'), type: 'search', grow: true,
@@ -186,6 +188,12 @@ createListTable({
               ] },
             { key: 'tag',   label: () => t('col_device_tags'), type: 'search', minWidth: '150px',
               placeholder: () => t('col_device_tags') },
+            // Where it is, as the inventory says — the sites both network maps group by, so
+            // narrowing to one is the same question in every view of this list.
+            { key: 'site',  label: () => t('dcim_site'), type: 'select', minWidth: '160px',
+              options: () => [{ value: '', label: t('all') },
+                              { value: '-', label: t('infra_net_no_site') }].concat(
+                  _infraSites.map(x => ({ value: x.uid, label: x.name }))) },
             // The class, with "unclassified" as an answer of its own — the registry's filter,
             // which came with its list: it is how somebody finds the devices added in a hurry,
             // and it is not the same question as "any".
@@ -201,6 +209,8 @@ createListTable({
             if (f.state === 'unwatched' && (h.status || '')) return false;
             if (f.state && f.state !== 'unwatched' && h.status !== f.state) return false;
             if (f.tag && !(h.tags || []).some(tg => has(tg, f.tag))) return false;
+            if (f.site === '-' && h.site) return false;
+            if (f.site && f.site !== '-' && (h.site || '') !== f.site) return false;
             if (f.type === '-' && h.device_type) return false;
             if (f.type && f.type !== '-' && (h.device_type || '') !== f.type) return false;
             return true;

@@ -4,6 +4,7 @@
     "labels": {
         "enabled": "Enabled",
         "threads": "Threads",
+        "simulated_interval": "Simulated cadence (s)",
         "label": "Label",
         "timeout": "Timeout (s)",
         "retries": "Retries",
@@ -15,6 +16,7 @@
     "hints": {
         "enabled": "Enable or disable this entry.",
         "threads": "Maximum number of OID checks to run in parallel.",
+        "simulated_interval": "Seconds between two samples of a simulated device (the demo's), each at its own moment within that interval; in between it keeps what it said last. 0 = every cycle.",
         "label": "Display name shown in the UI. Falls back to the item key if empty.",
         "timeout": "Seconds to wait for each SNMP response.",
         "retries": "Number of retries on timeout before declaring failure.",

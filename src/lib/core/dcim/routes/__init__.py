@@ -96,6 +96,7 @@
     GET    /api/v1/dcim/catalog/<uid>/history  what this model used to say, and who changed it
     POST   /api/v1/dcim/catalog/<uid>/restore  put a past version back
     GET    /api/v1/dcim/catalog               the model catalogue
+    GET    /api/v1/dcim/catalog/summary       how the library is: counts, quality, imports
     GET    /api/v1/dcim/catalog/suggest       what a device's own words point at
     GET    /api/v1/dcim/catalog/browse        what a GitHub library holds, first
     POST   /api/v1/dcim/catalog/upload        import a zip that came IN the request

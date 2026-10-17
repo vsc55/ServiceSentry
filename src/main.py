@@ -551,6 +551,9 @@ def args_init() -> argparse.Namespace:
     _g = _p.add_mutually_exclusive_group()
     _g.add_argument('--replace', action='store_true', help='rebuild it if it already exists')
     _g.add_argument('--remove', action='store_true', help='delete the demo site')
+    _g.add_argument('--status', action='store_true',
+                    help='say which demo version is installed and whether a newer one exists')
+    _p.add_argument('--quiet', action='store_true', help='do not print each step')
     _p.add_argument('--no-images', action='store_true',
                     help="do not download the makers' pictures of the catalogue basics")
     return ap.parse_args()

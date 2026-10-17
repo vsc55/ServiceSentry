@@ -763,7 +763,8 @@ class SnmpActions:
                     roots.add(str(m['walk']).strip('.'))
                 idx = m.get('index_label') or ''
                 for extra in (list(idx) if isinstance(idx, (list, tuple)) else [idx]) \
-                        + [m.get('scale_by') or '', m.get('value_label') or '']:
+                        + [m.get('scale_by') or '', m.get('precision_by') or '',
+                           m.get('value_label') or '']:
                     if extra:
                         roots.add(str(extra).strip('.'))
         if not todo:
@@ -782,7 +783,8 @@ class SnmpActions:
                     continue
                 idx = m.get('index_label') or ''
                 for extra in (list(idx) if isinstance(idx, (list, tuple)) else [idx]) \
-                        + [m.get('scale_by') or '', m.get('value_label') or '']:
+                        + [m.get('scale_by') or '', m.get('precision_by') or '',
+                           m.get('value_label') or '']:
                     if extra and extra not in extras:
                         extras.append(extra)
             wanted = sum(1 for t in todo if served.get(t[0], True))
@@ -799,6 +801,25 @@ class SnmpActions:
         answered = sum(1 for m in out if m['rows'] and not m['error'])
         steps.end('read', f'{answered}/{wanted}')
         return out, roots
+
+    @classmethod
+    def _probe_answers(cls, probe: str, conn: dict) -> bool:
+        """Whether the device answers a profile's `match.probe`: the instance it names, or —a
+        probe that names a table's COLUMN— one row of it.
+
+        Some MIBs have no scalar to ask: ENTITY-SENSOR-MIB is one table indexed by physical
+        entity, and which index a device's first sensor has is the device's business. So when
+        the GET is answered with «no such» (an answer, not a silence), the row after it is
+        asked for: under an instance (`….0`) there is never one, so a scalar probe means what
+        it always did, at the price of one more quick round trip when it is not served."""
+        from lib.core.snmp.client import NoAnswer          # noqa: PLC0415
+        value, err = cls._snmp_get(oid=probe, **conn)
+        if not err and value not in (None, ''):
+            return True
+        if isinstance(err, NoAnswer):
+            return False
+        rows, _werr = cls._snmp_walk_oid(oid=probe, max_rows=1, **conn)
+        return bool(rows)
 
     @classmethod
     def _test_served(cls, catalog: dict, assigned: list, conn: dict, pool, steps) -> dict:
@@ -828,11 +849,10 @@ class SnmpActions:
         # Submitted rather than mapped, so the count moves as the answers arrive: these are
         # the requests that WAIT — a probe for hardware the device has not got costs the whole
         # timeout — and a counter that only jumps at the end is the one somebody is watching.
-        futures = {pool.submit(cls._snmp_get, oid=probe, **conn): pid for pid, probe in pairs}
+        futures = {pool.submit(cls._probe_answers, probe, conn): pid for pid, probe in pairs}
         out = {}
         for fut in concurrent.futures.as_completed(futures):
-            value, err = fut.result()
-            out[futures[fut]] = not err and value not in (None, '')
+            out[futures[fut]] = bool(fut.result())
             steps.tick('serves')
         absent = sorted(p for p, ok in out.items() if not ok)
         steps.end('serves', f'{len(pairs) - len(absent)}/{len(pairs)}')
@@ -1285,11 +1305,10 @@ class SnmpActions:
             if probed >= _MAX_PROBES:
                 break
             probed += 1
-            value, perr = cls._snmp_get(oid=probe, **conn)
             # Answering at all is the signal: the value itself belongs to the profile's own
             # metrics, and a threshold here would be this action deciding something about a
             # profile it is not supposed to know anything about.
-            if perr or value in (None, ''):
+            if not cls._probe_answers(probe, conn):
                 continue
             proposed.append(pid)
             reasons[pid] = 'probe'

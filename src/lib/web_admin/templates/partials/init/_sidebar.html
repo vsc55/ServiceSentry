@@ -168,6 +168,29 @@ function _navPageView(pageId, slug) {
     if (_sbIsMobile()) _closeSidebar();
 }
 
+/** Whether the reader may open one VIEW: the section's permission already let them in, and a
+ *  view may ask for one more (`perm`). Before `/api/v1/me` has answered nothing is known, and
+ *  then nothing is refused — the route checks the permission too, and the sidebar entry stays
+ *  hidden until the permission pass reveals it. */
+function _sbViewAllowed(v) {
+    const need = (v && v.perm) || '';
+    if (!need) return true;
+    const mine = (window.currentUser || (typeof currentUser !== 'undefined' ? currentUser : null)
+                  || {}).permissions;
+    return !Array.isArray(mine) || mine.includes(need);
+}
+
+/** Put a number beside each view of a section in the sidebar: ``{slug: n}``. A section that
+ *  knows how much is behind each of its views says so here; one that does not leaves them
+ *  blank, and a blank count takes no room. `null`/`undefined` clears that view's count. */
+function _sbSetViewCounts(pageId, counts) {
+    Object.entries(counts || {}).forEach(([slug, n]) => {
+        const el = document.querySelector(
+            `#ss-sidebar [data-sb-vcount="${CSS.escape(pageId + '-' + slug)}"]`);
+        if (el) el.textContent = (n === null || n === undefined || n === '') ? '' : String(n);
+    });
+}
+
 /** Where a section lives, as the SERVER declared it — the one place that knows. */
 function _sbPageUrl(pageId) {
     return ((window.SS_STANDALONE_PAGES || []).find(p => p.id === pageId) || {}).url || '';
@@ -177,7 +200,9 @@ function _sbPageUrl(pageId) {
  *  says), then what was last chosen here, then the section's first view. */
 function _sbPageView(pageId) {
     const page = (window.SS_STANDALONE_PAGES || []).find(p => p.id === pageId);
-    const views = (page && page.views) || [];
+    // Only the views this reader may open: one that declares a permission of its own is not a
+    // place to land for somebody without it — neither from the URL nor from what was last used.
+    const views = ((page && page.views) || []).filter(_sbViewAllowed);
     if (!views.length) return '';
     const fromUrl = (typeof _sbViewFromPath === 'function') ? _sbViewFromPath() : '';
     if (fromUrl && views.some(v => v.slug === fromUrl)
@@ -476,9 +501,19 @@ function _sbActivateFromLocation() {
     }
     if (!paneId) return;
     const btn = document.querySelector(`[data-bs-target="#${paneId}"]`);
-    if (btn && btn.closest('li')?.style.display !== 'none') {
-        bootstrap.Tab.getOrCreateInstance(btn).show();
+    if (!btn || btn.closest('li')?.style.display === 'none') return;
+    // Back or Forward between two VIEWS of the section already on screen: the pane does not
+    // change, so Bootstrap's `show()` is a no-op and nothing redraws — the address said
+    // «Brands» and the screen went on showing «Models». The section is asked to draw the view
+    // the URL now names, through the same entry point a menu click uses.
+    const pageId = paneId.replace(/^tab-/, '');
+    const page = (window.SS_STANDALONE_PAGES || []).find(p => p.id === pageId);
+    if (document.getElementById(paneId)?.classList.contains('active') && (page?.views || []).length) {
+        _sbHighlightSub(_sbStoredSub(paneId));
+        if (typeof renderModulePageView === 'function') renderModulePageView(pageId);
+        return;
     }
+    bootstrap.Tab.getOrCreateInstance(btn).show();
 }
 window.addEventListener('popstate', _sbActivateFromLocation);
 

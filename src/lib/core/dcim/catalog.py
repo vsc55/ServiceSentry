@@ -283,7 +283,14 @@ POWER_TYPES = ('internal', 'external', 'poe')
 #: catálogo: un armario, y los módulos que no son un dispositivo entero.
 KINDS = ('server', 'switch', 'router', 'firewall', 'storage', 'patch_panel', 'fiber_panel',
          'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank',
+         # What stands on a desk, hangs on a wall or a ceiling: the room equipment, with the
+         # same words as the item roles (`ITEM_ROLES`), so a model of one suggests its role when
+         # it is placed. Without them a PC, an IP phone, a Wi-Fi AP, a camera, a display and a
+         # printer could only be `other`, and the library's «Type» could not tell them apart.
+         'pc', 'phone', 'ap', 'camera', 'display', 'printer',
          'rack', 'transceiver', 'psu', 'nic', 'module',
+         # A fan module or tray: what goes into a fan bay, as a PSU goes into a PSU bay.
+         'fan',
          # El control de accesos: no va en un armario, va en una puerta, en una taquilla o en
          # una pared, pero es un modelo que se compra, tiene marca y número de parte, y se
          # elige igual que un servidor. Lo que lo pone en su sitio es la pieza de sala que lo usa.
@@ -353,6 +360,7 @@ _MODULE_WORDS = (
     ('transceiver', ('sfp', 'qsfp', 'xfp', 'gbic', 'transceiver', 'optic')),
     ('psu', ('psu', 'power supply', 'powersupply', '-ps', 'pwr')),
     ('nic', ('nic', 'ethernet card', 'network card', 'hba', 'adapter')),
+    ('fan', ('fan module', 'fan tray', 'fan unit', 'fantray')),
 )
 
 
@@ -845,8 +853,38 @@ class CatalogStore(BaseStore):
         out['bays_placed'] = sum(1 for b in bahias if b in situadas)
         return out
 
+    #: The columns the Models list may be sorted by, each as ``(empty_test, expression)``.
+    #: A whitelist: the key comes from the request and only ever selects one of these literals,
+    #: so nothing the caller sends reaches the SQL. `empty_test` sorts the blank ones LAST in
+    #: both directions — a hundred rows of nothing on top of a descending «Imported» column is
+    #: a page that says nothing. All the columns are NOT NULL, so blank means `''` (or a height
+    #: of 0), and the test is the same on the three engines. «Written by hand» is two values
+    #: (`''` from before sources existed, and `manual`) and sorts as one.
+    SORTS = {
+        'maker':    ("manufacturer = ''", 'LOWER(manufacturer)'),
+        'model':    ("model = ''", 'LOWER(model)'),
+        'u':        ('u_tenths = 0', 'u_tenths'),
+        'kind':     ("kind = ''", 'LOWER(kind)'),
+        'source':   ('', "CASE WHEN source = '' THEN 'manual' ELSE LOWER(source) END"),
+        'imported': ("imported_at = ''", 'imported_at'),
+    }
+
+    @classmethod
+    def order_by(cls, sort: str = '', desc: bool = False) -> str:
+        """The ORDER BY of the list for *sort* (a `SORTS` key, anything else is the default).
+
+        The tie-break is always maker, model, uid: two pages of one ordering must not share or
+        lose a row, and on equal keys an engine is free to return them in any order it likes —
+        which is what a page boundary falls on."""
+        tail = 'LOWER(manufacturer), LOWER(model), uid'
+        if sort not in cls.SORTS:
+            return tail
+        vacio, expr = cls.SORTS[sort]
+        lead = f'CASE WHEN {vacio} THEN 1 ELSE 0 END, ' if vacio else ''
+        return f'{lead}{expr} {"DESC" if desc else "ASC"}, {tail}'
+
     def list(self, where: str = '', params: tuple = (), limit: int = 0,
-             offset: int = 0) -> list[dict]:
+             offset: int = 0, sort: str = '', desc: bool = False) -> list[dict]:
         sql = f'SELECT {", ".join(self._COLS)} FROM {self._sql_table}'
         if where:
             sql += f' WHERE {where}'
@@ -854,7 +892,8 @@ class CatalogStore(BaseStore):
         # sobre tres motores con tres criterios distintos por defecto —MySQL no distingue,
         # SQLite sí, PostgreSQL depende del idioma del sistema— y el orden de una lista no
         # puede depender de dónde esté instalado el panel.
-        sql += ' ORDER BY LOWER(manufacturer), LOWER(model)'
+        sql += (f' ORDER BY {self.order_by(sort, desc)}' if sort
+                else ' ORDER BY LOWER(manufacturer), LOWER(model)')
         if limit:
             sql += f' LIMIT {int(limit)}'
             if offset:
@@ -1145,17 +1184,77 @@ class CatalogStore(BaseStore):
             'GROUP BY kind ORDER BY COUNT(*) DESC') or ()
         return [(str(r[0]), int(r[1])) for r in rows]
 
-    def trees(self) -> list[tuple]:
+    def trees(self, where: str = '', params: tuple = ()) -> list[tuple]:
         """Cuántos modelos hay de cada forma: dispositivos, módulos, armarios, componentes.
 
         Es el filtro de primer nivel de la pantalla. Sin él, los DIMM y los armarios comparten
         tabla con los ocho mil dispositivos y no hay forma de mirar solo una de las cuatro cosas
         — que es justo como se mira: nadie busca «un armario o un DIMM».
+
+        Con *where*, de lo que dejan los OTROS filtros: el botón «Módulos 12» tiene que decir a
+        cuántos lleva con la marca y la búsqueda puestas, no cuántos módulos hay en total.
         """
-        rows = self._db.fetchall(
-            f'SELECT tree, COUNT(*) FROM {self._sql_table} '
-            'GROUP BY tree ORDER BY COUNT(*) DESC') or ()
+        sql = f'SELECT tree, COUNT(*) FROM {self._sql_table} '
+        if where:
+            sql += f'WHERE {where} '
+        rows = self._db.fetchall(sql + 'GROUP BY tree ORDER BY COUNT(*) DESC', params) or ()
         return [(str(r[0] or 'device-types'), int(r[1])) for r in rows]
+
+    #: Los orígenes que escribió una persona aquí y no trajo ninguna importación. El vacío es el
+    #: de antes de que existieran los orígenes: entonces solo se escribía a mano.
+    HAND_SOURCES = ('manual', '')
+
+    def quality(self) -> dict:
+        """Lo que le falta a la biblioteca, contado de UNA consulta.
+
+        Información y no tareas: en una biblioteca importada es normal que media no tenga foto.
+        Cada cifra es un filtro de la lista (``img=none``, ``ports=none``, ``brand=none``,
+        ``source=manual``), y por eso se cuenta con la misma condición que ese filtro aplica —
+        dos reglas para lo mismo serían una cifra que no coincide con la lista a la que lleva.
+
+        `SUM(CASE …)` porque es la forma que leen igual los tres motores; un `FILTER (WHERE …)`
+        solo lo entiende PostgreSQL.
+        """
+        conds = (('no_image', self.FLAG_SQL['img']), ('no_ports', self.FLAG_SQL['ports']),
+                 ('no_brand', self.FLAG_SQL['brand']), ('manual', self.FLAG_SQL['manual']))
+        sql = 'SELECT COUNT(*), ' + ', '.join(
+            f'SUM(CASE WHEN {c} THEN 1 ELSE 0 END)' for _k, c in conds)
+        fila = self._db.fetchone(sql + f' FROM {self._sql_table}') or ()
+        out = {'total': int((fila[0] if fila else 0) or 0)}
+        for i, (k, _c) in enumerate(conds, start=1):
+            out[k] = int((fila[i] if len(fila) > i else 0) or 0)
+        return out
+
+    #: La condición de cada filtro de calidad, escrita UNA vez: la usan la cuenta del resumen y
+    #: el filtro de la lista, y tienen que decir lo mismo.
+    FLAG_SQL = {
+        'img': "(front_image = '' OR front_image IS NULL)",
+        # Un DISPOSITIVO sin puertos es lo raro; un armario o un panel ciego no tienen — ni una
+        # bandeja: se contaban como «sin puertos» la tapa ciega y la bandeja, que no tienen
+        # ninguno que poner, y la cifra no llevaba a nada que arreglar.
+        'ports': ("(tree = 'device-types' AND kind NOT IN ('blank', 'shelf') "
+                  "AND (ports = '{}' OR ports = '' OR ports IS NULL))"),
+        # La marca escrita en el modelo pero sin ficha de marca a la que apuntar.
+        'brand': "(brand_uid = '' OR brand_uid IS NULL)",
+        'manual': "(source = 'manual' OR source = '' OR source IS NULL)",
+    }
+
+    def imports(self, limit: int = 8) -> list[tuple]:
+        """``[(source, imported_at, n), …]`` — las importaciones de las que queda algo, la más
+        reciente primero.
+
+        No hay tabla de importaciones y no hace falta: cada importación escribe todas sus filas
+        con su origen y **el mismo instante** (`replace`), así que agrupar por los dos es
+        recuperar cada tanda con lo que queda de ella. Una parcial que reemplazó a una marca de
+        la anterior deja a la anterior con menos filas, que es justo lo que es verdad hoy.
+        Lo escrito a mano no es una importación y no sale.
+        """
+        sql = (f'SELECT source, imported_at, COUNT(*) FROM {self._sql_table} '
+               "WHERE source <> 'manual' AND source <> '' AND imported_at <> '' "
+               'GROUP BY source, imported_at ORDER BY imported_at DESC, source')
+        if limit:
+            sql += f' LIMIT {int(limit)}'
+        return [(str(r[0]), str(r[1]), int(r[2])) for r in (self._db.fetchall(sql) or ())]
 
     def sources(self) -> list[tuple]:
         """Los orígenes que hay y cuántos modelos tiene cada uno.

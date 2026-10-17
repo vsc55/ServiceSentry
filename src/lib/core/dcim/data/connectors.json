@@ -9,10 +9,7 @@
       "families": [
         "power-ports"
       ],
-      "note": {
-        "es_ES": "El «trébol» de las fuentes de portátil.",
-        "en_EN": "The \"cloverleaf\" on laptop bricks."
-      },
+      "note": {"i18n": "iec-60320-c6/note"},
       "shape": "clover"
     },
     {
@@ -22,10 +19,7 @@
       "families": [
         "power-ports"
       ],
-      "note": {
-        "es_ES": "El «ocho», sin toma de tierra.",
-        "en_EN": "The \"figure-8\", no earth."
-      },
+      "note": {"i18n": "iec-60320-c8/note"},
       "shape": "fig8"
     },
     {
@@ -36,10 +30,7 @@
         "power-ports",
         "socket-jacks"
       ],
-      "note": {
-        "es_ES": "El de siempre: 10 A. Lo que lleva casi todo lo de rack.",
-        "en_EN": "The usual one: 10 A. What nearly every rack device has."
-      },
+      "note": {"i18n": "iec-60320-c14/note"},
       "shape": "c14"
     },
     {
@@ -49,10 +40,7 @@
       "families": [
         "power-ports"
       ],
-      "note": {
-        "es_ES": "Como el C14 pero para más temperatura.",
-        "en_EN": "Like the C14 but rated for more heat."
-      },
+      "note": {"i18n": "iec-60320-c16/note"},
       "shape": "c14"
     },
     {
@@ -63,10 +51,7 @@
         "power-ports",
         "socket-jacks"
       ],
-      "note": {
-        "es_ES": "20 A. El de las fuentes grandes: no entra en una C13.",
-        "en_EN": "20 A. Big power supplies: it will not go into a C13."
-      },
+      "note": {"i18n": "iec-60320-c20/note"},
       "shape": "c20"
     },
     {
@@ -157,10 +142,7 @@
       "families": [
         "power-ports"
       ],
-      "note": {
-        "es_ES": "El europeo de dos clavijas con tierra: el schuko de aquí.",
-        "en_EN": "The European two-pin with earth: the schuko."
-      },
+      "note": {"i18n": "cee-7-7/note"},
       "shape": "schuko-p"
     },
     {
@@ -170,10 +152,7 @@
       "families": [
         "power-ports"
       ],
-      "note": {
-        "es_ES": "El británico, el cuadrado con fusible dentro.",
-        "en_EN": "The British one, square pins with a fuse inside."
-      },
+      "note": {"i18n": "bs-1363/note"},
       "shape": "bs1363"
     },
     {
@@ -187,18 +166,12 @@
     },
     {
       "id": "dc-terminal",
-      "name": {
-        "es_ES": "Entrada de continua",
-        "en_EN": "DC input"
-      },
+      "name": {"i18n": "dc-terminal/name"},
       "group": "power-in",
       "families": [
         "power-ports"
       ],
-      "note": {
-        "es_ES": "Un alimentador externo. Al mudar el equipo hay que acordarse de llevárselo.",
-        "en_EN": "An external brick. Moving the machine means remembering to take it."
-      },
+      "note": {"i18n": "dc-terminal/note"},
       "shape": "dc-jack"
     },
     {
@@ -326,10 +299,7 @@
         "front-ports",
         "rear-ports"
       ],
-      "note": {
-        "es_ES": "Alimenta y habla por el mismo cable, según qué lleve el equipo dentro.",
-        "en_EN": "Powers and talks down the same lead, depending on what is behind it."
-      },
+      "note": {"i18n": "usb-c/note"},
       "shape": "usb-c",
       "gens": [
         {
@@ -495,10 +465,7 @@
         "power-outlets",
         "socket-jacks"
       ],
-      "note": {
-        "es_ES": "La boca normal de una regleta de rack. Va con un C14.",
-        "en_EN": "The usual socket on a rack strip. Pairs with a C14."
-      },
+      "note": {"i18n": "iec-60320-c13/note"},
       "shape": "c13"
     },
     {
@@ -518,10 +485,7 @@
         "power-outlets",
         "socket-jacks"
       ],
-      "note": {
-        "es_ES": "20 A. Va con un C20, y no con un C14: son dos cosas distintas.",
-        "en_EN": "20 A. Pairs with a C20, not a C14 — they are two different things."
-      },
+      "note": {"i18n": "iec-60320-c19/note"},
       "shape": "c19"
     },
     {
@@ -593,10 +557,7 @@
         "power-outlets",
         "socket-jacks"
       ],
-      "note": {
-        "es_ES": "La base schuko de pared.",
-        "en_EN": "The wall schuko socket."
-      },
+      "note": {"i18n": "cee-7-3/note"},
       "shape": "schuko-r"
     },
     {
@@ -612,10 +573,7 @@
     },
     {
       "id": "dc-terminal-out",
-      "name": {
-        "es_ES": "Salida de continua",
-        "en_EN": "DC output"
-      },
+      "name": {"i18n": "dc-terminal-out/name"},
       "abbr": "DC",
       "group": "power-out",
       "families": [
@@ -1129,10 +1087,7 @@
         "console-ports",
         "console-server-ports"
       ],
-      "note": {
-        "es_ES": "La consola con forma de boca de red. No es una boca de red.",
-        "en_EN": "A console port shaped like a network socket. It is not one."
-      },
+      "note": {"i18n": "rj-45/note"},
       "shape": "rj45",
       "signals": [
         "ethernet",
@@ -1158,10 +1113,7 @@
         "console-ports",
         "console-server-ports"
       ],
-      "note": {
-        "es_ES": "El serie de nueve pines, el que todos llaman «DB9».",
-        "en_EN": "The nine-pin serial, the one everybody calls \"DB9\"."
-      },
+      "note": {"i18n": "de-9/note"},
       "shape": "dsub"
     },
     {
@@ -1176,10 +1128,7 @@
     },
     {
       "id": "other",
-      "name": {
-        "es_ES": "Otro",
-        "en_EN": "Other"
-      },
+      "name": {"i18n": "other/name"},
       "group": "other",
       "families": [
         "console-ports",
@@ -1378,10 +1327,7 @@
     },
     {
       "id": "vga",
-      "name": {
-        "es_ES": "VGA (DE-15)",
-        "en_EN": "VGA (DE-15)"
-      },
+      "name": {"i18n": "vga/name"},
       "group": "video",
       "families": [
         "front-ports",
@@ -1392,10 +1338,7 @@
     },
     {
       "id": "audio-3-5mm",
-      "name": {
-        "es_ES": "Jack 3,5 mm",
-        "en_EN": "3.5 mm jack"
-      },
+      "name": {"i18n": "audio-3-5mm/name"},
       "group": "video",
       "families": [
         "front-ports",
@@ -1414,10 +1357,7 @@
         "rear-ports",
         "outlet-jacks"
       ],
-      "note": {
-        "es_ES": "El conector del latiguillo de red. «RJ-45» es como se le llama.",
-        "en_EN": "The network patch lead connector. \"RJ-45\" is what people call it."
-      },
+      "note": {"i18n": "8p8c/note"},
       "shape": "rj45"
     },
     {
@@ -1460,10 +1400,7 @@
         "rear-ports",
         "outlet-jacks"
       ],
-      "note": {
-        "es_ES": "La boca de teléfono ancha de seis contactos.",
-        "en_EN": "The six-contact telephone jack."
-      },
+      "note": {"i18n": "6p6c/note"},
       "shape": "rj12"
     },
     {
@@ -1476,10 +1413,7 @@
         "rear-ports",
         "outlet-jacks"
       ],
-      "note": {
-        "es_ES": "La roseta de teléfono de siempre: dos líneas.",
-        "en_EN": "The usual telephone jack: two lines."
-      },
+      "note": {"i18n": "6p4c/note"},
       "shape": "rj12"
     },
     {
@@ -1492,10 +1426,7 @@
         "rear-ports",
         "outlet-jacks"
       ],
-      "note": {
-        "es_ES": "La roseta de teléfono de una línea.",
-        "en_EN": "The single-line telephone jack."
-      },
+      "note": {"i18n": "6p2c/note"},
       "shape": "rj12"
     },
     {
@@ -1524,10 +1455,7 @@
     },
     {
       "id": "110-punch",
-      "name": {
-        "es_ES": "Regleta 110",
-        "en_EN": "110 punch-down"
-      },
+      "name": {"i18n": "110-punch/name"},
       "group": "copper",
       "families": [
         "front-ports",
@@ -1548,10 +1476,7 @@
     },
     {
       "id": "f",
-      "name": {
-        "es_ES": "Conector F",
-        "en_EN": "F connector"
-      },
+      "name": {"i18n": "f/name"},
       "abbr": "TV",
       "group": "copper",
       "families": [
@@ -1563,10 +1488,7 @@
     },
     {
       "id": "n",
-      "name": {
-        "es_ES": "Conector N",
-        "en_EN": "N connector"
-      },
+      "name": {"i18n": "n/name"},
       "group": "copper",
       "families": [
         "front-ports",
@@ -1586,10 +1508,7 @@
     },
     {
       "id": "splice",
-      "name": {
-        "es_ES": "Empalme",
-        "en_EN": "Splice"
-      },
+      "name": {"i18n": "splice/name"},
       "group": "fibre",
       "families": [
         "front-ports",
@@ -1740,10 +1659,7 @@
     },
     {
       "id": "module-bay",
-      "name": {
-        "es_ES": "Bahía de módulo",
-        "en_EN": "Module bay"
-      },
+      "name": {"i18n": "module-bay/name"},
       "group": "bay",
       "families": [
         "module-bays"
@@ -1752,10 +1668,7 @@
     },
     {
       "id": "psu-bay",
-      "name": {
-        "es_ES": "Bahía de fuente",
-        "en_EN": "PSU bay"
-      },
+      "name": {"i18n": "psu-bay/name"},
       "group": "bay",
       "families": [
         "module-bays"
@@ -1764,10 +1677,7 @@
     },
     {
       "id": "fan-bay",
-      "name": {
-        "es_ES": "Bahía de ventilador",
-        "en_EN": "Fan bay"
-      },
+      "name": {"i18n": "fan-bay/name"},
       "group": "bay",
       "families": [
         "module-bays"
@@ -1776,10 +1686,7 @@
     },
     {
       "id": "drive-bay",
-      "name": {
-        "es_ES": "Bahía de disco",
-        "en_EN": "Drive bay"
-      },
+      "name": {"i18n": "drive-bay/name"},
       "group": "bay",
       "families": [
         "module-bays"
@@ -1788,10 +1695,7 @@
     },
     {
       "id": "sfp-cage",
-      "name": {
-        "es_ES": "Jaula SFP",
-        "en_EN": "SFP cage"
-      },
+      "name": {"i18n": "sfp-cage/name"},
       "group": "bay",
       "families": [
         "module-bays"
@@ -1800,28 +1704,19 @@
     },
     {
       "id": "device-bay",
-      "name": {
-        "es_ES": "Bahía de dispositivo",
-        "en_EN": "Device bay"
-      },
+      "name": {"i18n": "device-bay/name"},
       "group": "bay",
       "families": [
         "device-bays"
       ],
-      "note": {
-        "es_ES": "Donde entra un nodo entero: una cuchilla, un servidor de un chasis.",
-        "en_EN": "Where a whole node goes: a blade, a node of a multi-node chassis."
-      },
+      "note": {"i18n": "device-bay/note"},
       "shape": "bay"
     }
   ],
   "signals": [
     {
       "id": "data",
-      "name": {
-        "es_ES": "Datos",
-        "en_EN": "Data"
-      }
+      "name": {"i18n": "signal/data"}
     },
     {
       "id": "ethernet",
@@ -1841,24 +1736,15 @@
     },
     {
       "id": "audio",
-      "name": {
-        "es_ES": "Audio",
-        "en_EN": "Audio"
-      }
+      "name": {"i18n": "signal/audio"}
     },
     {
       "id": "power-in",
-      "name": {
-        "es_ES": "Se alimenta",
-        "en_EN": "Takes power"
-      }
+      "name": {"i18n": "signal/power-in"}
     },
     {
       "id": "power-out",
-      "name": {
-        "es_ES": "Alimenta",
-        "en_EN": "Supplies power"
-      }
+      "name": {"i18n": "signal/power-out"}
     }
   ]
 }

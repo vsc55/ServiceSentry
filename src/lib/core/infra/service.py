@@ -913,6 +913,7 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
     lang = lang or getattr(wa, '_DEFAULT_LANG', '')
     meta_cache: dict = {}
     attrs_by_device: dict = {}
+    down_by_device: dict = {}
     for device in devices:
         uid = str(device.get('uid') or '')
         bound: dict = {}
@@ -937,6 +938,11 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
         named = {mod: (meta_cache.get(mod) or {}).get('sources') or {} for mod in bound}
         attrs_by_device[uid] = attributes(
             results, sources_of(fields, named))
+        # …and which of its ports are down, out of the same results: the one trace a cable
+        # that stopped working leaves (see `topology._down_edges`).
+        gone = ports_down(results)
+        if gone:
+            down_by_device[uid] = gone
     # What devices SAW, which is what places a machine on a switch port when it speaks
     # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
     # are not checks (see lib/core/infra/evidence.py); read here in one go for every kind.
@@ -955,4 +961,145 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
                 evidence[kind] = store.by_device(kind)
         except Exception:                       # pylint: disable=broad-except
             evidence = {}                       # a map without the ports beats no map
-    return topology_mod.build(devices, attrs_by_device, evidence)
+    return topology_mod.build(devices, attrs_by_device, evidence, down_by_device)
+
+
+#: ifOperStatus values that mean "this port is not carrying traffic": down(2) and
+#: lowerLayerDown(7). Dormant, testing and notPresent are something else and are not a cable
+#: that failed.
+_OPER_DOWN = (2, 7)
+
+
+def _as_int(value):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def ports_down(results) -> set:
+    """The rows of *results* that are an interface administratively up and operationally
+    down — a port somebody meant to be in use that is not.
+
+    Admin-down is left out on purpose: a port shut on purpose is a decision, not an incident,
+    and drawing it as a broken cable would be the map raising an alarm nobody should answer. A
+    row that reports no admin state is taken as meant to be up, which is what the default is on
+    every agent that omits it.
+    """
+    out = set()
+    for r in results or ():
+        data = r.get('data') if isinstance(r, dict) and isinstance(r.get('data'), dict) else None
+        row = str((r or {}).get('row') or '') if isinstance(r, dict) else ''
+        if not data or not row or 'if_oper' not in data:
+            continue
+        admin = _as_int(data.get('if_admin'))
+        if _as_int(data.get('if_oper')) in _OPER_DOWN and admin in (None, 1):
+            out.add(row)
+    return out
+
+
+#: How bad a state is, for the one place here that has to pick the worst of two: a link
+#: between sites takes the state of the equipment terminating it (the inventory's own rule,
+#: `dcim.service.links_roll`), and of two ends the worse one is the news.
+_STATE_RANK = {'error': 3, 'warning': 2, 'maintenance': 1, 'ok': 0}
+
+
+def places(wa, perms, uids) -> dict:
+    """Where each of these machines IS, as the inventory says it — and the links between sites.
+
+    ``{'sites': [{uid, name}], 'at': {device uid: {site, room, rack}}, 'links': [...]}``.
+
+    The two maps of the infrastructure section group by site: three hundred machines on one
+    canvas is a picture of nothing, and "which building" is the first thing anybody reading a
+    network diagram wants to know. The inventory already knows it — an item bound to a device
+    (``dc_item.device_uid``) sits in a rack, in a room, in a site — so this reads it, in bulk:
+    one read per table for the whole fleet, never a walk per machine.
+
+    **What the caller may not see does not come out**, by the inventory's own rule: the caller
+    needs ``dcim_view`` to read the inventory at all, and each item is resolved to its owning
+    company and kept only if that company is visible (``owners.may_see``) — exactly the check
+    the device's own *Location* tab makes. A machine whose rack this caller cannot see is just
+    a machine without a place on the map, which is the same answer that tab gives.
+
+    The ``links`` are the inventory's site-to-site links (``dc_link``) whose two terminating
+    items are machines of this map, each with the STATE of the worse of its two ends — a
+    circuit has no state of its own, the router that terminates it does (``links_roll``).
+    """
+    out = {'sites': [], 'at': {}, 'links': []}
+    perms = set(perms or ())
+    store = getattr(wa, '_dcim_store', None)
+    uids = {str(u) for u in (uids or ()) if u}
+    if store is None or 'dcim_view' not in perms or not uids:
+        return out
+    from lib.core.dcim import owners as dcim_owners           # noqa: PLC0415
+    try:
+        items = [i for i in store.items.list()
+                 if str(i.get('device_uid') or '') in uids]
+        if not items:
+            return out
+        racks = {str(r['uid']): r for r in store.racks.list()}
+        rooms = {str(r['uid']): r for r in store.rooms.list()}
+        sites = {str(r['uid']): r for r in store.sites.list()}
+        said = store.owners_map()
+        site_links = store.links_of()
+    except Exception:                       # pylint: disable=broad-except
+        return out                          # a map without places beats no map
+    allowed = dcim_owners.visible_orgs(perms)
+
+    seen_items: dict = {}                   # item uid → device uid, for the links below
+    used: set = set()
+    for item in sorted(items, key=lambda i: str(i.get('uid') or '')):
+        iuid = str(item.get('uid') or '')
+        rack = racks.get(str(item.get('rack_uid') or '')) or {}
+        room = rooms.get(str(rack.get('room_uid') or item.get('room_uid') or '')) or {}
+        site = sites.get(str(room.get('site_uid') or '')) or {}
+        # The same chain `DcimStore.chain_of` walks, built from what is already in memory.
+        chain = [('item', iuid)]
+        if rack:
+            chain.append(('rack', str(rack['uid'])))
+        if room:
+            chain.append(('room', str(room['uid'])))
+        if site:
+            chain.append(('site', str(site['uid'])))
+        if not dcim_owners.may_see(dcim_owners.owner_of(chain, said), allowed):
+            continue
+        dev = str(item['device_uid'])
+        seen_items[iuid] = dev
+        if dev in out['at'] or not site:
+            continue                        # the first place wins; a chassis and its tray
+        out['at'][dev] = {'site': str(site['uid']),
+                          'room': str(room.get('name') or ''),
+                          'rack': str(rack.get('name') or '')}
+        used.add(str(site['uid']))
+    out['sites'] = sorted(({'uid': u, 'name': str(sites[u].get('name') or u)} for u in used),
+                          key=lambda s: s['name'].lower())
+    for link in site_links or ():
+        a = seen_items.get(str(link.get('a_item') or ''))
+        b = seen_items.get(str(link.get('b_item') or ''))
+        if not a or not b or a == b:
+            continue
+        out['links'].append({'from': a, 'to': b, 'kind': 'site',
+                             'uid': str(link.get('uid') or ''),
+                             'via': str(link.get('kind') or ''),
+                             'label': str(link.get('label') or ''),
+                             'provider': str(link.get('provider') or '')})
+    return out
+
+
+def annotate_places(wa, payload: dict, perms) -> dict:
+    """Put :func:`places` on a map payload: a ``site`` (and ``room``/``rack``) on each node, the
+    sites list beside the networks, and the site-to-site links as edges with their state."""
+    nodes = payload.get('nodes') or []
+    got = places(wa, perms, [n.get('uid') for n in nodes])
+    status = {n.get('uid'): str(n.get('status') or '') for n in nodes}
+    for n in nodes:
+        here = got['at'].get(n.get('uid')) or {}
+        n['site'] = here.get('site', '')
+        n['room'] = here.get('room', '')
+        n['rack'] = here.get('rack', '')
+    for link in got['links']:
+        ends = [status.get(link['from'], ''), status.get(link['to'], '')]
+        link['state'] = max(ends, key=lambda s: _STATE_RANK.get(s, -1)) if any(ends) else ''
+    payload['sites'] = got['sites']
+    payload.setdefault('edges', []).extend(got['links'])
+    return payload

@@ -38,6 +38,7 @@ from lib.config import ConfigControl, load_config, secret_key_path
 from lib.config.spec import cfg_default, cfg_get, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
+from lib.modules.simulated import is_simulated_result as _is_simulated_result
 from lib.core.object_base import ObjectBase
 from lib.security import secret_manager
 
@@ -626,7 +627,7 @@ class Monitor(ObjectBase):
         return self._uid_name_map().get(key, key)
 
     def send_message(self, message, status=None, module: str = '', item: str = '',
-                     severity: str = '', kind: str = '') -> None:
+                     severity: str = '', kind: str = '', simulated: bool = False) -> None:
         """Ad-hoc alert from a watchful module (the ModuleBase.send_message bridge).
 
         Buffered into the current cycle's notification batch; the emoji/host formatting
@@ -648,11 +649,15 @@ class Monitor(ObjectBase):
           heading.
 
         The kind is carried BESIDE the ordinary one rather than replacing it — see
-        `MonitorNotifier.add`."""
+        `MonitorNotifier.add`.
+
+        ``simulated`` is an alert about a result no probe produced (the demo's simulated SNMP
+        agents): buffered like any other and kept from every channel by the notifier."""
         if message and self._notifier is not None:
             base = self._alert_kind(status, severity)
             self._notifier.add(base, module, item or '', message,
-                               also=self._notify_kind(kind, status))
+                               also=self._notify_kind(kind, status),
+                               **({'simulated': True} if simulated else {}))
 
     @staticmethod
     def _notify_kind(kind: str, status) -> str:
@@ -740,7 +745,10 @@ class Monitor(ObjectBase):
                     if not (kind == 'recovery' and first_record):
                         # Prefer the module-supplied friendly name; else resolve the key.
                         label = result_data.get_name(key) or self._item_label(module_name, key)
-                        self._notifier.add(kind, module_name, label, tmp_message)
+                        # A simulated result raises its alert like a real one, marked: the
+                        # notifier keeps it from every channel (`MonitorNotifier._send`).
+                        self._notifier.add(kind, module_name, label, tmp_message,
+                                           simulated=_is_simulated_result(tmp_other_data))
 
                 self.debug.print(
                     f"> Monitor > check_module >> Module: {module_name}/{key} - New Status: {tmp_status}"
@@ -775,9 +783,12 @@ class Monitor(ObjectBase):
         current = set(result_data.keys())
         live_prefixes = {str(k).split('/', 1)[0] for k in current}
         orphans = []
+        kept = getattr(result_data, 'is_kept', None)
         for k in list(mod_status):
             if k in current:
                 continue                                    # still reported → keep
+            if kept is not None and kept(k):
+                continue                                    # not asked this run → stands
             entry = mod_status.get(k)
             if isinstance(entry, dict) and 'status' in entry:
                 orphans.append(k)                           # stale result → drop
@@ -898,6 +909,17 @@ class Monitor(ObjectBase):
             result_data = module.check()
 
             if isinstance(result_data, ReturnModuleCheck):
+                # The items answered by a scenario instead of a probe (`lib.modules.simulated`):
+                # the module never saw them, so their answer joins its result here, and from
+                # here on it is a result like any other — state, history, alerts.
+                try:
+                    from lib.modules import simulated      # noqa: PLC0415
+                    simulated.merge_into(result_data,
+                                         self.config_modules.get_conf([module_name]) or {},
+                                         device_scope=only_device)
+                except Exception as exc:  # pylint: disable=broad-except
+                    self.debug.print(f"> Monitor > check_module >> {module_name}: simulated "
+                                     f"items not answered: {exc}", DebugLevel.warning)
                 return True, module_name, result_data
 
             msg_debug = '\n\n' + '*' * 60 + '\n'

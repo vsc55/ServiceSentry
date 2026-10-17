@@ -113,6 +113,75 @@ La diferencia manda en el abandono:
 
 ---
 
+### Un agente simulado (`simulated_agent.py`)
+
+Un dispositivo cuyo perfil `snmp` lleva una descripción `simulated` —los de la demo
+(`lib/core/dcim/demo_monitor.py`)— se muestrea con el muestreador y los perfiles **de verdad**:
+`_sample_server` liga su dirección a esa descripción (`simulated_agent.bind_server`) y
+`SnmpClient._snmp_get` / `_snmp_walk_oid` contestan desde `simulated_agent.Agent` en vez de abrir
+un socket. Para una dirección ligada no se envía nada nunca. El agente construye la MIB al
+vuelo, para el instante en que se le pregunta: sistema (RFC 1213), `ifTable`/`ifXTable` con
+contadores que son la integral de una tasa con oscilación diaria —solo crecen, dan la vuelta a
+32 bits como un `ifInOctets`—, LLDP (`lldpRemTable`, los vecinos que dice el cableado del
+inventario), ENTITY-MIB (serie, modelo, firmware), HOST-RESOURCES y UCD (CPU por núcleo,
+almacenamiento, memoria, carga, sensores). `silent` es un dispositivo que no contesta: un
+`NoAnswer`, como uno inalcanzable. Los OID de empresa de los fabricantes ficticios cuelgan de
+32473, el número que IANA reserva para documentación (RFC 5612); un servidor Linux dice el de
+net-snmp (8072), como uno real. Identidad, medidas de cabecera, últimos datos, mapa de red y
+deriva de cableado salen de esas filas igual que de las de un equipo real.
+
+Un SAI contesta además **UPS-MIB** (RFC 1628: identidad, batería, entrada, salida y bypass por
+línea, tabla de alarmas) y una PDU **ENTITY-SENSOR-MIB** (RFC 3433: un sensor por toma, por fase
+y por entrada, cada uno una entidad física de clase *sensor* dentro del chasis, con su tipo, sus
+decimales y su lectura). La carga es la que el inventario les cuelga (ver
+`docs/ref-cli.md`, «La vigilancia de la demo»).
+
+**Su ritmo.** Un agente simulado contesta de memoria, pero cada muestra es todo el trabajo del
+muestreador real: cada perfil, cada fila, una fila de estado y una muestra de histórico por fila.
+Los 451 dispositivos de la demo en cada ciclo eran un minuto de planificador sobre SQLite con las
+páginas del panel esperando detrás, para unos números que son función del reloj. Así que se
+muestrean **a su ritmo**: `simulated_interval` (ajuste del módulo, 300 s; 0 = en cada ciclo),
+cada uno en su momento dentro del intervalo (`simulated_agent.is_due`, fase estable por
+dispositivo), de modo que un ciclo muestrea la porción cuyo momento llegó, uno detrás de otro en
+un solo hilo y cediendo el intérprete entre dos. Los que no tocan se **conservan**
+(`ReturnModuleCheck.keep`): el monitor no los poda como ítems que el módulo dejó de informar, y
+siguen diciendo lo último que dijeron. Una recogida de un solo dispositivo, o una prueba, lo
+muestrea en el momento. El momento de su última muestra se guarda junto a sus líneas base de
+contadores (`module_state.sim_at`).
+
+**Su marca.** Todo lo que contesta un agente simulado lleva `_simulated` en sus datos, así que un
+aviso que levante el propio módulo SNMP sobre él —una sede de la demo que deja de contestar, un
+SAI en bypass— pasa por el ciclo y no llega a ningún canal, como los de los ítems simulados.
+
+### Perfiles estándar de energía: `ups_mib` y `entity_sensor`
+
+Para un SAI o una PDU de cualquier fabricante, sin su MIB:
+
+| Perfil | MIB | Lo que lee |
+|---|---|---|
+| `ups_mib` | UPS-MIB (RFC 1628), `1.3.6.1.2.1.33` | Identidad (`upsIdent`: fabricante, modelo, firmware, agente, nombre, equipos conectados); batería (estado, segundos en batería, autonomía en minutos, carga, tensión y corriente en décimas, temperatura); entrada (fuera de tolerancia, líneas, y por línea frecuencia en décimas de Hz, tensión, corriente, potencia); salida (origen —normal, bypass, batería…—, frecuencia, y por línea tensión, corriente, potencia y **carga**); tensión del bypass por línea; alarmas (`upsAlarmsPresent` y la tabla `upsAlarmTable`, cuyo valor es el OID de una alarma conocida: con `path` se queda su último arco y `states` le da nombre); potencia nominal en VA y W. Se detecta por `upsIdentModel.0` |
+| `entity_sensor` | ENTITY-SENSOR-MIB (RFC 3433), `1.3.6.1.2.1.99` | Una fila por sensor, con el nombre de ENTITY-MIB (`entPhysicalName`), separados por lo que miden con `where` sobre `entPhySensorType` (tensión alterna y continua, corriente, potencia, frecuencia, temperatura, humedad, RPM) y con los decimales de cada uno (`precision_by` sobre `entPhySensorPrecision`); y el estado de cada sensor (`entPhySensorOperStatus`, con recuento). La MIB no tiene ningún escalar que preguntar, así que su `probe` es la **columna** `entPhySensorType`: se reconoce porque tiene alguna fila (ver abajo). Va junto a `entity_physical` |
+
+**Por qué estos dos.** No hay una MIB de PDU neutral: la de cada fabricante es la suya. La forma
+estándar de contar sensores es ENTITY-SENSOR-MIB, y es la que usa una PDU medida que no trae MIB
+propia (y muchos equipos de red para sus temperaturas y fuentes). La otra candidata estándar,
+ENERGY-OBJECT-MIB / POWER-ATTRIBUTES-MIB (EMAN, RFC 7460/7461), apenas la sirve nadie. Lo que
+ENTITY-SENSOR-MIB deja fuera: `entPhySensorScale` (kilo, mili…) no se aplica —se da por
+*units*, que es lo que contestan casi todas—, y la toma a la que pertenece un sensor está en su
+nombre, no en una columna (`entPhysicalContainedIn` es un número).
+
+**Un `probe` puede ser una columna.** La detección y la prueba de perfiles hacen un GET del
+`probe`; si el dispositivo contesta «no existe» —una respuesta, no un silencio—, piden la fila
+siguiente bajo ese OID (`SnmpActions._probe_answers`). Bajo una instancia (`….0`) no hay nunca
+ninguna, así que un `probe` escalar significa lo de siempre, por una vuelta corta más cuando no
+se sirve; uno que nombra una columna dice «la tabla tiene alguna fila». Un dispositivo que no
+contesta no recibe la segunda pregunta.
+
+Los perfiles llevan los OID en número, como todos (el catálogo **no resuelve nombres MIB**): no
+hace falta tener las MIB compiladas para muestrear con ellos. Para verlas en el navegador de MIB,
+UPS-MIB y ENTITY-SENSOR-MIB se importan como cualquier otra desde las fuentes declaradas
+(`lib/core/snmp/mibs/sources/`); el producto no trae ficheros MIB propios.
+
 ## Qué se muestrea
 
 Hay dos caminos, y se unen antes de ejecutar.
@@ -176,6 +245,7 @@ ahí, por orden:
 | `index_label` | Uno o **varios** OIDs, recorridos una vez y cacheados, unidos con ` / `. Una tabla SMART necesita dos porque ninguna columna sola nombra la fila |
 | `with` | La columna que viaja en la misma fila (dirección + máscara). `as: "prefix"` convierte la máscara en prefijo y devuelve `''` para una máscara no contigua en vez de un número inventado. Sólo se aplica a `kind: text`: «un número con algo pegado detrás es un texto que antes era una medida» |
 | `scale_by` | Un multiplicador por fila leído de otra columna (`hrStorageAllocationUnits`). Si la columna no da nada usable vale **1**, nunca 0 y nunca una fila descartada |
+| `precision_by` | Los **decimales** de la lectura, por fila, leídos de otra columna (`entPhySensorPrecision` de ENTITY-SENSOR-MIB: 2315 con precisión 1 son 231,5 V): la lectura se divide por 10 elevado a ese número. Si la columna no da un entero entre −8 y 9, no se toca |
 
 **Un recorrido por columna de apoyo, la nombren las métricas que la nombren.** Una tabla de
 interfaces con cinco métricas contra un `ifDescr` es **un** recorrido, no cinco.

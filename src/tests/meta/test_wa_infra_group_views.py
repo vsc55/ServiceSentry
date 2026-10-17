@@ -291,14 +291,21 @@ class TestTheLinkMap:
         failed to draw — which is exactly what somebody would report."""
         src = self._links()
         assert 'infra_link_loose' in src
-        body = src.split('function _infraLinkLayout(')[1].split('\n}')[0]
+        body = src.split('function _infraLinkBase(')[1].split('\n}')[0]
         assert 'loose' in body
 
     def test_the_layout_is_stable_between_redraws(self):
         """A map that reorders itself on every refresh reads as movement nobody caused. Both
-        the root and the order inside a tier are sorted, not taken as they arrive."""
-        body = self._links().split('function _infraLinkLayout(')[1].split('\n}')[0]
-        assert body.count('sort(') >= 2, body.count('sort(')
+        the root and the order inside a tier are sorted, not taken as they arrive.
+
+        The ordering is the clustered layout's now (`_netgraph.html`): the groups, the bands
+        inside a site and the machines inside a band are each sorted, and nothing in it is
+        random — the node probes run it twice and compare."""
+        graph = _read(os.path.join(INFRA, '_netgraph.html'))
+        for fn in ('ssNetGroups', '_ngBlock', '_ngShelf'):
+            body = graph.split('function ' + fn + '(')[1].split('\n}')[0]
+            assert 'sort(' in body, fn
+        assert 'Math.random' not in graph
 
     def test_it_carries_no_layout_library(self):
         """The page is self-contained — no CDN — and a spring simulation on a flat rack
@@ -624,7 +631,13 @@ class TestAPortOnTheMapGoesToThePort:
         with the others about a device somebody just retyped."""
         box = self._links().split('function _infraLinkBox(')[1].split(chr(10) + '}')[0]
         assert 'deviceTypeIcon(' in box
-        assert 'foreignObject' in box, 'SVG has no <i>, and these are font glyphs'
+        # SVG has no <i>, and these are font glyphs: drawn as the font's own glyph in an SVG
+        # <text> (a `foreignObject` per box was what made three hundred of them slow), with
+        # the `foreignObject` kept as the fallback where the glyph cannot be read.
+        assert 'ssNetIcon(' in box
+        icon = _read(os.path.join(INFRA, '_netgraph.html')).split(
+            'function ssNetIcon(')[1].split(chr(10) + '}')[0]
+        assert 'foreignObject' in icon and 'bootstrap-icons' in icon
 
     def test_the_port_waits_for_the_payload(self):
         """The machine may not be loaded. Waiting inside the click handler would mean two code
@@ -680,7 +693,8 @@ class TestWhichEndIsTheOneSayingIt:
         was reported by neither, so a badge there would be answering a question nobody asked
         of it."""
         body = self._panel()
-        assert "claim === 'one' ?" in body
+        # …and on a `down` line, which is also one end (or both) saying a port is dead.
+        assert "claim === 'one' || claim === 'down' ?" in body
 
     def test_the_silent_end_says_what_silence_means(self):
         """A badge that only says "no" sends somebody to look for a fault. The two reasons an
@@ -808,10 +822,14 @@ class TestTheBoxesCanBePutWhereTheyBelong:
         """Not at draw time. Everything downstream reads one set of positions — the wires, the
         extent, the panel — and a line computed from the generated layout while the box is
         drawn somewhere else is a line that ends in the air."""
-        for f, fn in (('_links.html', '_infraLinkLayout'), ('_map.html', '_infraMapLayout')):
+        for f, fn in (('_links.html', '_infraLinkPlace'), ('_map.html', '_infraMapPlace')):
             body = _read(os.path.join(INFRA, f)).split(
                 'function ' + fn + '(')[1].split(chr(10) + '}')[0]
             assert 'ssCanvasPlace(' in body, f
+            # …and the layout every reader goes through is that one, on the kept base.
+            layout = _read(os.path.join(INFRA, f)).split(
+                'function ' + fn.replace('Place', 'Layout') + '(')[1].split(chr(10) + '}')[0]
+            assert fn + '(' in layout, f
 
     def test_and_the_drawing_grows_to_hold_it(self):
         """A box dragged past the old extent would sit outside the viewBox: a device you moved

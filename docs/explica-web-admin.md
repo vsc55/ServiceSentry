@@ -132,7 +132,7 @@ flowchart TD
 | **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [explica-seguridad.md](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | **Página propia** (`/overview`, separada del panel de administración) con tarjetas de resumen (Modules, Checks, Servers, **Services**, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events, **fail2ban**) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente, **IP baneadas**); cada widget enlaza (click-through) a su pestaña del panel; los widgets de tabla con filtro muestran un **indicador del filtro activo** en la cabecera — uno o varios badges (p.ej. Servers "Error + Mantenimiento" pinta ambos; Syslog pinta "≥ nivel"); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin. El widget **Services** cuenta los servicios embebidos activos vs parados |
-| **Navegación (sidebar + shell SPA)** | La navegación es una **barra lateral colapsable**: arriba las secciones que se miran (Resumen, Infraestructura, Inventario, Historial, Syslog y las de los módulos) y debajo dos grupos de lo que se administra: **Catálogo**, los datos de referencia de la organización (Empresas, Tipos de dispositivo, Clústeres, Modelos, Plantillas, Credenciales, SNMP), y **Sistema**, la plataforma (Servicios, Módulos, Configuración, Acceso, Auditoría, Copias…). Dentro de cada grupo, las entradas van en el orden alfabético del idioma de quien lee; cada usuario puede **reordenarlas** (menú de usuario → *Personalizar menú*: arrastrar o flechas, en el primer nivel y dentro de cada grupo, sin cambiar de grupo) y su orden se guarda en `sidebar_order` de sus preferencias — claves estables, no rótulos; lo que el orden guardado no conoce entra en su sitio por defecto y lo que no puede abrir sigue oculto; una sección declarada elige grupo con `placement` y una pestaña del core con `group` en `PANEL_TABS`. **Todas las URLs sirven el MISMO shell** (`dashboard.html`) y la ruta solo elige qué panel arranca activo, así que moverse entre secciones es un cambio de pestaña **sin recarga**, incluida `/account`. Las secciones se declaran en el registro `HOME_PAGES` con su descriptor `standalone` (panel, función de render, permiso, icono y rótulo): una factoría de rutas las sirve, la sidebar se construye del mismo dato y el panel se genera de ahí. **Un módulo watchful puede aportar la suya** declarando `__page__` en su `schema.json` (hoy `/module/m365` y `/module/azure`): obtiene URL, entrada de sidebar con su permiso, panel y cableado sin que el core lo nombre — ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__). `/history` acepta enlace profundo `?module=&key=` (es el salto "ver historial de este check" desde Infraestructura). Ver §[Layout de la UI](#layout-de-la-ui-sidebar-shell-spa-y-full-bleed) |
+| **Navegación (sidebar + shell SPA)** | La navegación es una **barra lateral colapsable**: arriba las secciones que se miran (Resumen, Infraestructura, Inventario, Historial, Syslog y las de los módulos) y debajo dos grupos de lo que se administra: **Catálogo**, los datos de referencia de la organización (Empresas, Tipos de dispositivo, Clústeres, Biblioteca —marcas, modelos, plataformas, conectores—, Plantillas, Credenciales, SNMP), y **Sistema**, la plataforma (Servicios, Módulos, Configuración, Acceso, Auditoría, Copias…). Dentro de cada grupo, las entradas van en el orden alfabético del idioma de quien lee; cada usuario puede **reordenarlas** (menú de usuario → *Personalizar menú*: arrastrar o flechas, en el primer nivel y dentro de cada grupo, sin cambiar de grupo) y su orden se guarda en `sidebar_order` de sus preferencias — claves estables, no rótulos; lo que el orden guardado no conoce entra en su sitio por defecto y lo que no puede abrir sigue oculto; una sección declarada elige grupo con `placement` y una pestaña del core con `group` en `PANEL_TABS`. **Todas las URLs sirven el MISMO shell** (`dashboard.html`) y la ruta solo elige qué panel arranca activo, así que moverse entre secciones es un cambio de pestaña **sin recarga**, incluida `/account`. Las secciones se declaran en el registro `HOME_PAGES` con su descriptor `standalone` (panel, función de render, permiso, icono y rótulo): una factoría de rutas las sirve, la sidebar se construye del mismo dato y el panel se genera de ahí. **Un módulo watchful puede aportar la suya** declarando `__page__` en su `schema.json` (hoy `/module/m365` y `/module/azure`): obtiene URL, entrada de sidebar con su permiso, panel y cableado sin que el core lo nombre — ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__). `/history` acepta enlace profundo `?module=&key=` (es el salto "ver historial de este check" desde Infraestructura). Ver §[Layout de la UI](#layout-de-la-ui-sidebar-shell-spa-y-full-bleed) |
 | **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
 | **Mantenimiento (borrado de datos)** | Config → General → **Mantenimiento** reúne los borrados destructivos: *Borrar Una Serie*, *Borrar Todo El Historial*, *Vaciar Mensajes De Syslog*, *Eliminar Todos Los Eventos De Auditoría*, *Borrar El Registro De Notificaciones De Eventos* y *Borrar El Historial De Baneos*. Antes vivían en la barra de la propia sección que vacían — páginas que se dejan abiertas todo el día. La tarjeta no tiene campos propios: cada dominio aporta su botón como `CONFIG_ACTION` sobre la sección `maintenance`, con el permiso (`history_delete`, `syslog_delete`, `audit_delete`, `events_notify_delete`, `ipban_history_delete`) que oculta el botón a quien no lo tenga. Elegir *qué* serie borrar abre un modal selector. Ver [explica-descubrimiento.md §7b](explica-descubrimiento.md#7b-acciones-de-config-y-ui-aportadas-por-un-paquete-config_actions--web) |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
@@ -246,6 +246,67 @@ recarga de datos, así que un dispositivo nuevo aporta su etiqueta sin robar el 
 Cuando un filtro deja la tabla vacía se dice **eso** ("Ninguna fila coincide con estos filtros", con
 el botón de limpiar), no el estado vacío propio de la tabla — que afirmaría que no hay usuarios
 mientras un filtro los esconde.
+
+### Los dos mapas de red de Infraestructura
+
+La lista de Infraestructura tiene dos vistas que dibujan la red en vez de listarla: **Mapa**
+(direcciones: quién alcanza a quién) y **Enlaces** (cables: qué está enchufado a qué). Las dos
+leen el mismo payload (`GET /api/v1/infra/map`) y se dibujan con el mismo motor,
+`partials/infra/_netgraph.html`, sobre el lienzo compartido (`_canvas.html`: zoom, arrastre,
+encuadre, exportar).
+
+Antes de la build 149 eran un dibujo de toda la flota de una pieza: un árbol que con los 356
+dispositivos de la demo salía como una sola fila de placas con un abanico de curvas, y unas
+columnas por saltos que salían como una tira de una caja de ancho. Ahora se dibujan **por sede**:
+
+- **La sede** es la del inventario: el equipo enlazado a un dispositivo (`dc_item.device_uid`)
+  está en un armario, en una sala, en una sede (`infra.service.places`, una lectura por tabla para
+  toda la flota). Quien no tiene `dcim_view`, o no puede ver la empresa dueña de ese armario, no
+  recibe la sede — la misma regla que la pestaña *Ubicación* de la ficha. Sin sede del inventario,
+  se agrupa por la primera parte de la ubicación que declara el propio dispositivo (sysLocation),
+  dicho como tal; sin ninguna de las dos, «Sin sede». Con una sola sede no se dibuja ningún marco.
+- **Cada sede es un marco que se pliega** en una caja con su recuento, los puntos por estado y el
+  borde del color del peor — también si lo peor es un **enlace caído dentro**. Las líneas hacia
+  una sede plegada se suman en una sola con el número encima y el peor estado. Con más de
+  `_NG.AUTO` (120) dispositivos las sedes empiezan plegadas; lo que cada uno pliega o despliega se
+  guarda **por mapa en su cuenta**, en la configuración de la tabla `infra` (`net`, junto a la
+  vista), y le sigue a otro navegador.
+- **Dentro de una sede, bandas**: en Enlaces por papel —borde, núcleo (un switch cableado a tres
+  o más switches), acceso, servidores, terminales— y ordenadas por el baricentro de sus cables
+  respecto a la banda de arriba; en Mapa, una banda por **red**, dibujada como la placa sobre la
+  que están sus máquinas (estar en una red es estar dentro de su placa, sin una línea por
+  máquina). Se envuelven a un ancho de ≈1,6:1, así que doscientos servidores son un bloque y no una
+  columna.
+- **Partes plegadas**: en Enlaces, lo que cuelga de un switch por **un solo cable** se pliega en
+  ese switch como una píldora «+N» con el color del peor (y de sus cables); en Mapa, una red de más
+  de `_NG.BAND_MAX` (24) máquinas en una sede se pliega en su placa. Se abren pulsando, una a una o
+  todas con el botón de la barra; plegar o desplegar sedes no las toca.
+- **Las sedes se colocan en dos dimensiones**: empaquetadas y luego unos cientos de rondas de
+  muelles **entre bloques** (los unidos se atraen, todos se separan según su tamaño), y por último
+  se apartan los rectángulos hasta que ninguno pisa a otro. Nunca un muelle por máquina: eso es
+  O(n²) por ronda y la maraña que el mapa de cables se escribió para no dibujar. Determinista:
+  la misma flota da el mismo dibujo en cada refresco.
+
+**Estados en el dibujo.** La caja de cada máquina lleva el color de su estado. Un puerto
+administrativamente arriba y operativamente caído cuya descripción nombra otra máquina de la flota
+es un enlace **`down`** (rojo, discontinuo): es lo único que queda de un cable que dejó de
+funcionar, porque las dos tablas LLDP lo olvidan (`topology._down_edges`, `service.ports_down`). Si
+el par aún tiene un cable vivo, ese cable queda **degradado**. Los enlaces entre sedes del
+inventario (`dc_link`) se dibujan entre los equipos que los terminan, con el **estado del peor
+extremo** (la regla de `links_roll`). En Mapa, un siguiente salto que nadie ha dado de alta se
+dibuja **una vez**, como el router que es, y no como una salida por máquina.
+
+**Filtros y búsqueda.** Las dos vistas reciben las máquinas que deja la barra de filtros de la
+lista (texto, estado, etiqueta, tipo y **sede**, que es nueva) y dibujan sólo esas. La caja
+«Buscar en el mapa…» resalta lo que coincide y lo que está unido a ello, y con Intro abre la sede
+(o la parte plegada) donde está y encuadra la caja.
+
+**Rendimiento.** El trazado se guarda (`_lnkMemo`/`_mapMemo`) y lo que cambia al arrastrar se
+aplica encima, así que el panel de lectura no re-traza en cada movimiento del puntero; los iconos
+son glifos de la fuente en `<text>` y no un `foreignObject` por caja; y de lejos (menos de 0,5 px
+por unidad) no se pintan los textos de las máquinas (`ss-net-far`). Una flota sintética de 1008
+máquinas y 1428 cables se traza en menos de 100 ms y se dibuja entera en ~0,6 s la primera vez;
+hay una guarda con presupuesto en `tests/integration/test_wa_infra_netgraph.py`.
 
 ---
 
@@ -1285,8 +1346,20 @@ La forma es siempre la misma, y vive en `partials/core/`:
 - **el conmutador** — `_viewSwitcher(...)`, un grupo de botones idéntico en todo el panel.
 - **el cuerpo** — `bodyMode` de `createListTable`: `'cards'` es otro cuerpo sobre la **misma
   página**; `'summary'` recibe **todas** las filas filtradas y **no dibuja paginación**.
+- **la página en el servidor** — `serverPaging: {total(ctx), maxPageSize}` de
+  `createListTable`, para la lista que no se puede traer entera (los miles de modelos del
+  catálogo): las filas que da `rows` son **ya** la página que contestó el servidor, así que la
+  tabla no las filtra, ni las ordena, ni las recorta, y el total sale de `total`. Ordenar,
+  paginar y cambiar el tamaño pasan por el mismo estado y los mismos manejadores de siempre, y
+  es `prepare` —que corre en cada dibujado— quien pide la página que esos piden. El selector de
+  tamaños pierde lo que el servidor no sirve (y «todos»).
+- **la barra de dentro** — `toolbar(ctx, mode)`: lo que una tabla pone DENTRO de su tarjeta,
+  bajo la cabecera y encima de la banda de paginación (`.ss-card-tools`) —botones de forma, una
+  fila de filtros, las fichas de lo puesto, la franja de lo marcado—, también en los vacíos.
 
 Hay una vuelta de tuerca en las secciones que aporta un módulo: ahí las vistas no son solo disposiciones de una lista, sino **caras distintas de la sección**, cada una con su sub-path (`/module/m365/storage`) y su sitio en un desplegable de la barra lateral. Se declaran en el `schema.json` del módulo (`__page__.views`), comparten panel y permiso, y una de tipo `table` recibe del módulo sus columnas y sus filas — el núcleo dispone, ordena, filtra y pagina sin saber qué significan. Esas tablas traen además dos disposiciones propias (barras y agrupada) cuando el módulo declara qué columna dibujar. Ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__).
+
+Las del core funcionan igual. **Catálogo › Biblioteca** es una página declarada (`HOME_PAGES`, id `models`, `placement: catalog`) con seis vistas, cada una con su dirección: `/catalog/library/summary` (Resumen), `/brands`, `/models`, `/platforms`, `/connectors` y `/schemas`. La barra lateral las despliega con su cuenta al lado (`_sbSetViewCounts`), pulsar «Biblioteca» vuelve a la última usada (`ss_active_view_models`) y la entrada conserva su clave de orden (`t:models`). Una vista puede pedir **un permiso más que su sección** (`perm` en la vista): Esquemas pide `dcim_catalog_manage`, así que la barra no la ofrece a quien solo lee, `_sbPageView` no aterriza en ella y la ruta manda a la sección. Moverse entre vistas empuja una dirección con lo que esa vista tiene puesto (`_dcLibGo`), y atrás/adelante entre dos vistas de la sección abierta la redibuja (`_sbActivateFromLocation`), cosa que antes no pasaba en ninguna sección con vistas. Los enlaces de antes —`/admin?tab=models&ctab=brands`, `/dcim/catalog?ctab=…`— llegan a su vista con el resto de su consulta (`_dcLibMigrate`). El Resumen cuenta cada cifra con la misma condición que el filtro de la lista al que lleva (`GET /api/v1/dcim/catalog/summary`); la ficha de una marca o de un modelo se abre a un lado (`showDrawer`, `partials/core/_drawer.html`) sin salir de la lista, e Importar es un cuadro con su píldora en la cabecera mientras dura. Marcas y Modelos son las dos listas estándar del panel (`createListTable`, claves `dcbrd` y `dccat`): una tarjeta de borde a borde sin renglón de título encima; la de Modelos va paginada y ordenada en el servidor (`serverPaging`, `?sort=&dir=&limit=`) y sus filas no llevan botones: abren su ficha, que es donde se edita, se clona y se quita uno.
 
 Esa última distinción es la regla que gobierna las vistas nuevas: un resumen **cuenta cosas**
 («4 dispositivos sin ninguna comprobación», «6 baneos de esta IP»), y un recuento hecho sobre una

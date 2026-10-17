@@ -102,6 +102,16 @@ def _row_factor(column, index):
     return got if got > 0 else 1
 
 
+def _row_precision(column, index):
+    """The factor this row's ``precision_by`` column gives: ``10 ** -decimals``, or 1 when the
+    column says nothing usable (RFC 3433 bounds it to -8…9)."""
+    try:
+        got = int(str((column or {}).get(index, '')).strip())
+    except (TypeError, ValueError):
+        return 1
+    return 10.0 ** -got if -8 <= got <= 9 and got else 1
+
+
 def prefix_of(mask: str) -> str:
     """A dotted netmask as the number of bits, or ``''`` when it is not one.
 
@@ -157,6 +167,8 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
     idx = metric.get('index_label') or ''
     idx_oids = list(idx) if isinstance(idx, (list, tuple)) else ([idx] if idx else [])
     by_oid = metric.get('scale_by') or ''
+    # …and the column that says where the decimal point goes, per row.
+    dec_oid = metric.get('precision_by') or ''
     # The table this reading points AT, when it is a reference and not a measurement.
     v_oid = metric.get('value_label') or ''
     # …and which component of the row's own index the reading IS, when it is in there.
@@ -171,7 +183,8 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
     # …and the column that travels WITH this one on the same row (an address and its mask).
     pair = metric.get('with') or {}
     p_oid = str(pair.get('oid') or '')
-    for extra in (idx_oids + ([by_oid] if by_oid else []) + ([w_oid] if w_oid else [])
+    for extra in (idx_oids + ([by_oid] if by_oid else []) + ([dec_oid] if dec_oid else [])
+                  + ([w_oid] if w_oid else [])
                   + ([p_oid] if p_oid else []) + ([v_oid] if v_oid else [])):
         if extra not in columns:
             found, _e = walk(oid=extra, **sized, **conn)
@@ -252,5 +265,6 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
             if mate:
                 raw = f'{_text(raw)}{pair.get("sep", " ")}{mate}'
         out.append({'index': index, 'key': row_key, 'name': row_name, 'raw': raw,
-                    'factor': _row_factor(columns.get(by_oid), index) if by_oid else 1})
+                    'factor': (_row_factor(columns.get(by_oid), index) if by_oid else 1)
+                    * (_row_precision(columns.get(dec_oid), index) if dec_oid else 1)})
     return out, (err or None)

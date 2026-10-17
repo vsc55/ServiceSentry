@@ -87,6 +87,8 @@ TRANSLATIONS      # dict[lang_code, LANG_dict]
 
 El `context_processor` de Flask inyecta la traducción activa como `i18n` en
 todas las plantillas. El JavaScript la recibe en la constante `I18N`.
+Sin las secciones que dan nombre a los datos del producto (ver
+[Los textos de los datos que trae el producto](#los-textos-de-los-datos-que-trae-el-producto)).
 
 ---
 
@@ -108,6 +110,63 @@ Las claves de presentación (`labels`, `hints`, `group_labels`, …) se fusionan
 Cada campo declarado en `schema.json` debería tener una clave correspondiente
 en `labels`. Si falta, la resolución cae en cascada (ver sección
 [Resolución de etiquetas en el navegador](#resolución-de-etiquetas-en-el-navegador)).
+
+---
+
+## Los textos de los datos que trae el producto
+
+**Regla:** una traducción vive en **un solo sitio** —los ficheros de idioma del core
+(`src/lib/i18n/lang/<idioma>.py`) o los del propio módulo (`src/watchfuls/<m>/lang/`)—. Un
+fichero de **datos** que viaja con el producto no lleva un texto por idioma dentro:
+
+- **Lo que trae el producto** nombra cada texto por **clave**: donde iba
+  `{"es_ES": "…", "en_EN": "…"}` el fichero pone `{"i18n": "<clave>"}`, y la palabra está en
+  una sección de datos de los ficheros de idioma del core. El cargador la resuelve al leer
+  (`lib.i18n.materialize`) y devuelve el mismo `{idioma: texto}` de siempre, así que todo lo que
+  ya leía esos textos —`label_of` de un perfil, `_text` de un conector— sigue igual.
+- **Lo que escribe la instalación** lleva sus textos dentro, porque es suyo: los perfiles SNMP
+  propios (ficheros en `<var_dir>/snmp_profiles` o escritos en el panel) y sus grupos, el
+  documento de conectores guardado en Catálogo › Biblioteca › Esquemas, las filas del catálogo.
+
+Orden de resolución de una etiqueta: el texto guardado en el propio objeto (el del usuario) →
+la clave del objeto que trae el producto, en el idioma de quien lee → el idioma por defecto →
+la clave o el id.
+
+| Datos | Fichero | Sección | Claves |
+|---|---|---|---|
+| Perfiles SNMP (53) | `lib/core/snmp/profiles/sources/*.json` | `snmp_shipped_profiles` | `<perfil>/label`, `/short`, `/desc`, `<perfil>/<métrica>`, `<perfil>/<métrica>/chart`, `<perfil>/<métrica>/<estado>` |
+| Conectores | `lib/core/dcim/data/connectors.json` | `dcim_shipped_connectors` | `<conector>/name`, `<conector>/note`, `signal/<señal>` |
+| Básicos DCIM | `lib/core/dcim/data/basics.json` | `dcim_shipped_basics` | `<slug>/model`, `<slug>/description`, `<slug>/specs/<campo>`, `platform/<plataforma>/notes` |
+| Palabras de la demo | (en código: `demo.texts(lang)`) | `dcim_demo_words` | las mismas que antes tenía `data/demo/<idioma>.json` |
+| Palabras de la demo de monitorización | (`demo_monitor.texts(lang)`) | `dcim_demo_monitor_words` | las de `data/demo_monitor/<idioma>.json` |
+
+La demo no tiene fichero de datos: elige sus palabras por idioma (castellano como base de una
+traducción parcial), como antes, pero de la sección y no de un JSON por idioma.
+
+**Copiar y sobrescribir.** Un perfil copiado en la pantalla de perfiles recibe los textos ya
+resueltos (en el idioma de quien copia), que es lo que permite editarlos. Un fichero del
+producto copiado tal cual a `<var_dir>/snmp_profiles` para sobrescribirlo sigue resolviendo
+las claves que lleve; lo que se reescriba con texto propio manda.
+
+**El documento de conectores.** Es editable entero: el editor recibe el documento **con las
+palabras ya resueltas**, así que lo que se guarda lleva textos literales —de todos los
+conectores, no solo de los cambiados—. Es una sustitución del documento entero que gana por
+versión, y un documento guardado que mezclara claves y textos dejaría de decir qué es de quién.
+«Restaurar el predeterminado» borra el guardado y vuelve el del producto, con sus claves. Si un
+documento guardado conserva alguna referencia `{"i18n": …}` (pegada desde el fichero), se
+resuelve igual.
+
+**Fuera de la página.** Las secciones de datos (`lib.i18n.DATA_SECTIONS`) se resuelven en el
+servidor y **no** viajan a la constante `I18N` del navegador (`ui_strings(lang)`): serían cientos
+de cadenas de peso muerto en cada carga.
+
+**Guardas.** `tests/meta/test_i18n_shipped_data.py`: ningún JSON del producto lleva un mapa con
+claves de idioma, ningún fichero fuera de una carpeta `lang/` se llama como un idioma, cada clave
+referenciada existe y no está vacía en **todos** los idiomas, y no queda palabra que nadie
+referencie. `tests/meta/test_i18n_no_text_in_code.py` hace lo mismo con los diccionarios
+literales en el código, del core y de los módulos. `tests/unit/test_i18n_shipped_texts.py`
+compara cada texto resuelto, en cada idioma, con el capturado antes de la migración
+(`tests/fixtures/i18n_shipped_before.json`).
 
 ---
 

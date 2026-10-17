@@ -10,6 +10,8 @@ duplicated between the two, so the shared behaviour lives in one place.
 
 from __future__ import annotations
 
+import threading
+
 # ── Results that belong to a device rather than to a check ─────────────────────────────────
 #
 # A check is an item somebody configured, and its result is filed under that item's key. Some
@@ -40,6 +42,53 @@ def device_uid_from_key(key: str) -> str:
     if not text.startswith(DEVICE_RESULT_PREFIX):
         return ''
     return text[len(DEVICE_RESULT_PREFIX):].split('/', 1)[0].strip()
+
+
+#: The device index of the last few state snapshots: ``[(status_raw, fingerprint, index)]``.
+#: See :func:`device_keys`.
+_INDEXES: list = []
+_INDEXES_KEPT = 4
+_INDEXES_LOCK = threading.Lock()
+
+
+def _fingerprint(status_raw: dict) -> tuple:
+    return (len(status_raw), tuple(len(v) if isinstance(v, dict) else -1
+                                   for v in status_raw.values()))
+
+
+def device_keys(status_raw: dict) -> dict:
+    """``{device uid: [(module key, result key), …]}`` of a recorded state, in its order.
+
+    **One pass for the whole fleet.** The screens ask the state about one device at a time —
+    what it said about itself, what was sampled of it — inside a loop over every device, and
+    each question scanned every result of every module: a fleet of 356 devices sampled by SNMP
+    is some seventeen thousand results, and the device list asked 356 times, six million key
+    comparisons, seven seconds a page (the map, a few of these, thirty-five).
+
+    Kept for the last few snapshots and found by identity: the state a request read is one
+    dict, asked about over and over. A snapshot that GREW or shrank since (the monitor's own,
+    mid-cycle) is indexed again. Only the keys are kept, never the values: whatever is read
+    through it is read live from *status_raw*.
+    """
+    if not isinstance(status_raw, dict):
+        return {}
+    fp = _fingerprint(status_raw)
+    with _INDEXES_LOCK:
+        for snap, sfp, index in _INDEXES:
+            if snap is status_raw and sfp == fp:
+                return index
+    index: dict = {}
+    for mod_key, mod_status in status_raw.items():
+        if not isinstance(mod_status, dict):
+            continue
+        for res_key in mod_status:
+            uid = device_uid_from_key(res_key)
+            if uid:
+                index.setdefault(uid, []).append((mod_key, res_key))
+    with _INDEXES_LOCK:
+        _INDEXES[:] = [x for x in _INDEXES if x[0] is not status_raw][-(_INDEXES_KEPT - 1):]
+        _INDEXES.append((status_raw, fp, index))
+    return index
 
 
 def device_profile_specs(device_profile) -> list[dict]:
@@ -129,25 +178,23 @@ def reported_facts(status_raw: dict, uid: str) -> dict:
     if not uid or not isinstance(status_raw, dict):
         return out
     seen = set()
-    for mod_status in status_raw.values():
-        if not isinstance(mod_status, dict):
+    for mod_key, res_key in device_keys(status_raw).get(uid, ()):
+        info = (status_raw.get(mod_key) or {}).get(res_key)
+        if not isinstance(info, dict):
             continue
-        for res_key, info in mod_status.items():
-            if device_uid_from_key(res_key) != uid or not isinstance(info, dict):
+        data = info.get('other_data')
+        if not isinstance(data, dict) or str(data.get('_row') or '').strip():
+            continue                    # a row's facts belong to that row
+        for source, facts in (data.get('_attrs') or {}).items():
+            if not isinstance(facts, dict):
                 continue
-            data = info.get('other_data')
-            if not isinstance(data, dict) or str(data.get('_row') or '').strip():
-                continue                    # a row's facts belong to that row
-            for source, facts in (data.get('_attrs') or {}).items():
-                if not isinstance(facts, dict):
+            for role, value in facts.items():
+                role, value = str(role or '').strip(), str(value or '').strip()
+                if not role or not value or (role, source) in seen:
                     continue
-                for role, value in facts.items():
-                    role, value = str(role or '').strip(), str(value or '').strip()
-                    if not role or not value or (role, source) in seen:
-                        continue
-                    seen.add((role, source))
-                    out.setdefault(role, []).append({'value': value,
-                                                     'source': str(source or '')})
+                seen.add((role, source))
+                out.setdefault(role, []).append({'value': value,
+                                                 'source': str(source or '')})
     return out
 
 

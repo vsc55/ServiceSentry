@@ -17,12 +17,14 @@ lines of comparison logic to find out is how a package's front door stops being 
 
 import concurrent.futures
 import re
+import time
 
 from lib.debug import DebugLevel
 
 from lib.core.snmp import devices as _devices
+from lib.core.snmp import simulated_agent as _simulated_agent
 from lib.core.snmp.client import _HAS_PYSNMP
-from .defaults import _CHECK_DEFAULTS, _SERVER_DEFAULTS, _cfg_int
+from .defaults import _CHECK_DEFAULTS, _MODULE_DEFAULTS, _SERVER_DEFAULTS, _cfg_int
 
 
 class SnmpChecks:
@@ -104,6 +106,11 @@ class SnmpChecks:
                                  step=self._msg('snmp_step_unsampled',
                                                 lang=self.watcher_lang()))
 
+        # The simulated devices (the demo's, `lib.core.snmp.simulated_agent`) on a cadence of
+        # their own: the slice whose moment came, one after another on a single worker; the
+        # rest keep what they said last.
+        sampled, simulated = self._simulated_split(sampled)
+
         # Friendly label per result key (keys are opaque "<srv_uid>.<chk_uid>").
         labels = {k: (str(c.get('label') or '').strip() or k) for k, c, _ in items}
 
@@ -120,6 +127,8 @@ class SnmpChecks:
                 pool.submit(self._sample_item, srv_key, srv): srv_key
                 for srv_key, srv in sampled
             })
+            if simulated:
+                futures[pool.submit(self._sample_simulated, simulated)] = 'simulated'
             for future in concurrent.futures.as_completed(futures):
                 key = futures[future]
                 try:
@@ -132,6 +141,76 @@ class SnmpChecks:
 
         super().check()
         return self.dict_return
+
+    # ── Simulated devices ──────────────────────────────────────────────────────
+
+    def _simulated_interval(self) -> int:
+        """Seconds between two samples of a simulated device (`simulated_interval`)."""
+        return max(0, _cfg_int(self.get_conf('simulated_interval', None),
+                               _MODULE_DEFAULTS.get('simulated_interval',
+                                                    _simulated_agent.DEFAULT_INTERVAL)))
+
+    def _simulated_split(self, sampled: list) -> tuple[list, list]:
+        """``(real, due)``: *sampled* without its simulated devices, and the simulated ones due
+        now. Each simulated device that is NOT due is kept as it is (`ReturnModuleCheck.keep`).
+
+        A run narrowed to one machine, and a probe, sample it whatever its moment: somebody
+        asked for it now."""
+        store = getattr(self._monitor, '_devices_store', None) if self.is_monitor_exist else None
+        if store is None or not sampled:
+            return sampled, []
+        try:
+            sims = {str(d.get('uid') or ''): d for d in store.list(decrypt=False)
+                    if _simulated_agent.spec_of_device(d)}
+        except Exception:  # pylint: disable=broad-except
+            return sampled, []
+        if not sims:
+            return sampled, []
+        interval = self._simulated_interval()
+        now = time.time()
+        forced = bool(self.device_scope) or self.is_probe
+        real, due = [], []
+        for srv_key, srv in sampled:
+            uid = str((srv or {}).get('device_uid') or '').strip()
+            if uid not in sims:
+                real.append((srv_key, srv))
+                continue
+            last = self._simulated_last(srv_key)
+            if forced or _simulated_agent.is_due(uid, last, now, interval):
+                due.append((srv_key, srv))
+            else:
+                self.dict_return.keep(srv_key)
+        return real, due
+
+    def _simulated_last(self, srv_key: str):
+        if not self.is_monitor_exist:
+            return None
+        try:
+            return self._monitor.status.get_conf(
+                [self.name_module, f'{srv_key}/metrics', 'module_state',
+                 _simulated_agent.SAMPLED_AT], None)
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def _sample_simulated(self, batch: list) -> None:
+        """Sample the simulated devices due this cycle, one after another.
+
+        One worker and not the pool's: they answer from memory, so the pool would only race
+        them for the interpreter against the panel's own requests. Each one's moment is written
+        beside its counter baselines (``module_state``), where the next cycle reads it."""
+        for srv_key, srv in batch:
+            try:
+                self._sample_item(srv_key, srv)
+            except Exception as exc:  # pylint: disable=broad-except
+                self._debug(f'SNMP: {srv_key} — unhandled exception: {exc}', DebugLevel.error)
+            if self.is_monitor_exist:
+                try:
+                    self._monitor.status.set_conf(
+                        [self.name_module, f'{srv_key}/metrics', 'module_state',
+                         _simulated_agent.SAMPLED_AT], time.time())
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            time.sleep(0)       # the interpreter to whoever is waiting for it, between two
 
     # ── Private helpers ────────────────────────────────────────────────────────
 

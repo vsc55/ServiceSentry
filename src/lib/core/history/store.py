@@ -379,8 +379,13 @@ class HistoryStore(BaseStore):
         data: dict | None = None,
         *,
         item_uid: str | None = None,
+        ts: float | None = None,
     ) -> None:
         """Insert one sample — the MEASUREMENTS of it.
+
+        *ts* is when it was taken, ``now`` when not given. Only a backfill passes one — the
+        demonstration's days of past readings (`lib.core.dcim.demo_monitor`) — and it writes
+        them oldest first, so the series' ``last_ts`` / ``last_status`` stay the newest.
 
         What the thing IS goes to its series instead of being written out again on every
         reading. The convention already exists and is the recorders' own: a key starting with
@@ -395,7 +400,7 @@ class HistoryStore(BaseStore):
         Reads put it back (:meth:`_with_attrs`), so nothing above this store can tell — and a
         sample recorded before this change keeps its own copy, which wins over the series'.
         """
-        now = time.time()
+        now = time.time() if ts is None else float(ts)
         medidas, identidad = _split_sample(data)
         sid = self.series_id(module, key, item_uid=item_uid)
         # Lo último que dijo la serie sigue siendo un documento, y ahí sí está bien: es UNA fila
@@ -445,6 +450,52 @@ class HistoryStore(BaseStore):
                 f'{type(exc).__name__}: {exc}',
                 file=sys.stderr, flush=True,
             )
+
+    #: How many samples `record_many` writes in one transaction.
+    MANY_CHUNK = 200
+
+    def record_many(self, records) -> int:
+        """Insert many samples — ``[(module, key, status, data), …]`` — as `record` does each,
+        a transaction per `MANY_CHUNK` of them instead of one per sample. Returns how many.
+
+        What a cycle writes at its end: one sample per result of every module, sixteen thousand
+        on the demo's SNMP fleet, and a commit each was most of the cycle on SQLite —two
+        milliseconds of `fsync` a sample— with the panel's own writes queued behind it. The
+        series are resolved before the transaction opens (creating one commits on its own).
+
+        A chunk that fails is written again one sample at a time (`record`), so one sample that
+        cannot be written costs that sample and not the other two hundred; and a series another
+        process deleted meanwhile is found, and created again, on that same path."""
+        recs = [tuple(r) for r in records or ()]
+        hechas = 0
+        for i in range(0, len(recs), self.MANY_CHUNK):
+            parte = recs[i:i + self.MANY_CHUNK]
+            listas = []
+            for module, key, status, data in parte:
+                medidas, identidad = _split_sample(data)
+                listas.append(((str(module or ''), str(key or '')), bool(status), medidas,
+                               identidad, self.series_id(module, key)))
+            now = time.time()
+            try:
+                with self._db.transaction():
+                    for ident, status, medidas, identidad, sid in listas:
+                        crudo = json.dumps(medidas, ensure_ascii=False)
+                        if sid and self._touch_series(sid, ident, identidad, now, status,
+                                                      crudo) == 0:
+                            raise LookupError(f'series {ident} is gone')
+                        self._db.execute(
+                            f'INSERT INTO {_T}(ts, item_uid, status, series_id) '
+                            'VALUES(?, ?, ?, ?)', (now, None, 1 if status else 0, sid))
+                        if sid:
+                            self.facts.write(sid, now, medidas, strict=True)
+                self.facts.settle(committed=True)
+                hechas += len(parte)
+            except Exception:  # pylint: disable=broad-except
+                self.facts.settle(committed=False)
+                for module, key, status, data in parte:
+                    self.record(module, key, status, data)
+                hechas += len(parte)
+        return hechas
 
     def delete_series(
         self, module: str, key: str, *, item_uid: str | None = None

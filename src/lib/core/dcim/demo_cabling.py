@@ -145,11 +145,21 @@ class _Cabling:
                      label='%s-%s%02d' % (dist['tag'], par['letter'], n))
 
 
+#: The demo model of each device of a room, by its role.
+_ROOM_MODEL = {'pc': 'pc', 'phone': 'phone', 'ap': 'ap', 'camera': 'camera',
+               'display': 'display', 'printer': 'printer'}
+
+
 def _room_item(b, room: str, role: str, label: str, x: float, y: float, rot: int = 0,
                **extra) -> str:
     data = {'room_uid': room, 'rack_uid': '', 'placement': 'room', 'u_start': 0, 'u_height': 0,
             'face': 'full', 'role': role, 'label': label, 'pos_x': round(x), 'pos_y': round(y),
             'rotation': rot}
+    # Its demo model —the PC, the phone, the access point…—. A wall outlet and a power socket
+    # have none: what they hold is their own jacks, chosen outlet by outlet (`jacks`).
+    modelo = b.models.get(_ROOM_MODEL.get(role, ''), '')
+    if modelo:
+        data['type_uid'] = modelo
     data.update(extra)
     return b.new('items', data)
 
@@ -250,7 +260,7 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                                mount='wall', jacks=[('8p8c', 2), ('hdmi', 1)])
                 toma = socket_for(room, 'T-TV-%s' % w['room_' + rk], W / 2 + 100, 60, 180, panel_of(fkey),
                            [('cee-7-3', 2)], mount='wall')
-                patch(tv, 'hdmi-lan', o, 'A')
+                patch(tv, 'eth0', o, 'A')
                 plug(tv, toma)
                 cuenta['displays'] += 1
                 if mesa:
@@ -379,12 +389,16 @@ def _cctv(b, floors, net, cuenta, wire, outlet_for, patch, socket_at, plug) -> N
     rack = b.s.items.get(core2)['rack_uid']
     pdus = tuple(p['uid'] for p in b.s.pdus_of(rack))
     # (Lo que es y cuánto guarda, en sus discos: la descripción del equipo la pisa su estado.)
-    nvr = b.item(rack, 'NVR-01', 'storage', 26, 4, depth_mm=700, model='storage')
+    # The array without its template: a recorder fills eight of its bays, not twenty-four.
+    nvr = b.item(rack, 'NVR-01', 'storage', 26, 4, depth_mm=700, model='storage', build=False)
     b.dual(nvr, 'storage', pdus, watts=320)
     b.cable(nvr, 'ctrlA-0', core1, 'Gi1/0/3', color='red', length=3000, label='NVR-CORE1')
     b.cable(nvr, 'ctrlB-0', core2, 'Gi1/0/3', color='red', length=2000, label='NVR-CORE2')
-    b.new('parts', {'item_uid': nvr, 'kind': 'hdd', 'size': '8 TB', 'qty': 8,
-                    'model': 'Surveillance HDD', 'description': w['nvr_desc']})
+    b.new('parts', b.part_row('hdd8t', ['Disk %d' % i for i in range(8)], item_uid=nvr,
+                              description=w['nvr_desc']))
+    for clave, bahias in (('pcm', ['PSU bay 1', 'PSU bay 2']),
+                          ('ctrl', ['Controller A', 'Controller B']), ('bbu', ['BBU A', 'BBU B'])):
+        b.fit(nvr, clave, bahias)
     # Where it is watched from: reception and the NOC.
     for fkey, rk, label, x in (('floor_ground', 'recep', 'MON-CCTV-1', 1500),
                                ('floor_first', 'noc', 'VW-NOC-1', 2000),

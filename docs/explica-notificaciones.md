@@ -206,6 +206,17 @@ flowchart TD
 > `route_kind` (p.ej. **"Run all"** on-demand → `manual_run`) hace que el flush completo
 > enrute como **un** único kind; el digest sigue mostrando los estados reales.
 
+### Avisos simulados: nunca salen
+
+Un resultado que no produjo ninguna sonda —el de un *ítem simulado* (`lib/modules/simulated.py`),
+como los de la vigilancia de la demo— recorre el mismo camino que uno real: el monitor detecta el
+cambio de estado, lo guarda en `check_state` y en el histórico, y llama a `MonitorNotifier.add`.
+Lo hace **marcado** (`simulated=True`, porque su `other_data` lleva `_simulated`), y
+`MonitorNotifier._send` lo descarta antes de recorrer los canales (`deliverable`): ni Telegram,
+ni Teams, ni el correo, ni un webhook lo reciben, sea cual sea la matriz. Un lote que solo trae
+avisos simulados no llama a ningún canal. No hay ajuste para dejarlos pasar: sería decidir sobre
+el teléfono de otro que una sede que no existe está caída.
+
 ---
 
 ## Matriz de routing (`notifications`)

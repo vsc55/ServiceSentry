@@ -203,7 +203,8 @@ def _wan_port(device: dict) -> str:
     return ''
 
 
-def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) -> dict:
+def build(devices: list, attrs_by_device: dict, evidence: dict | None = None,
+          down: dict | None = None) -> dict:
     """The map: ``{'networks': [...], 'nodes': [...], 'edges': [...], 'unplaced': [...]}``.
 
     *devices* is the fleet as the list screen has it (uid, name, …). *attrs_by_device* is
@@ -221,6 +222,12 @@ def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) ->
     device states it in IEEE8023-LAG-MIB (the `lag` profile). Present only for the ends that
     serve it, because the alternative is the map calling four cables a bundle for having
     counted four of them.
+
+    *down* is ``{uid: {port, …}}`` — the interfaces each machine reports administratively up
+    and operationally down. A cable that stopped carrying traffic drops out of both neighbour
+    tables, so the one place it is still written down is the port's own description: a port
+    described with the name of a machine of this fleet, and down, is drawn as a ``down`` edge
+    between the two (see `_down_edges`). Nothing is inferred from a port with no description.
     """
     nodes: list = []
     networks: dict = {}
@@ -230,6 +237,7 @@ def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) ->
     by_mac: dict = {}                    # …and every MAC → (uid, the interface it is on)
     aggs: dict = {}                      # …and, per uid, which aggregate each port is in
     seen: dict = {}                      # uid → the neighbours it reported
+    aliases: dict = {}                   # uid → {port: the description it carries}
     unplaced: list = []
 
     for device in devices or ():
@@ -257,6 +265,9 @@ def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) ->
             # for the same reason: it is a fact about a PORT. The name is the aggregate's own
             # interface name, resolved on the way in — the MIB answers an interface index, and
             # "member of 141" is the same fact nobody can read.
+            alias = str(row.get('alias') or '').strip()
+            if alias and row.get('row'):
+                aliases.setdefault(uid, {})[str(row['row'])] = alias
             agg = str(row.get('aggregate') or '').strip()
             if agg and row.get('row'):
                 aggs.setdefault(uid, {})[str(row['row'])] = agg
@@ -295,7 +306,11 @@ def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) ->
                 # …and the port somebody DECLARED as the way out, which is a different kind of
                 # statement from a next hop: a next hop is what the routing table happens to
                 # say today, and this is what the person who ran the cable says the line IS.
-                'wan': _wan_port(device)}
+                'wan': _wan_port(device),
+                # …and where the machine SAYS it is (sysLocation). Not a place the panel
+                # vouches for — the inventory binding is — but the one a device with no rack in
+                # the inventory still has, and what the map groups it by when nothing else does.
+                'location': str(facts.get('location') or '')}
         nodes.append(node)
         for net in set(nets):
             networks[net]['members'].append(uid)
@@ -395,7 +410,10 @@ def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) ->
             mine = {p: a for p, a in mine.items() if a}
             if mine:
                 link.setdefault('lag', {})[uid] = mine
+    known = {n['uid'] for n in nodes}
+    down_edges = _down_edges(down or {}, aliases, by_name, known, links)
     edges.extend(links[k] for k in sorted(links))
+    edges.extend(down_edges)
     # …and the machines a switch has placed on a port, for everything that speaks no LLDP.
     # Never over the top of a cable already established: a pair with both is one link, and the
     # LLDP one is the stronger statement of the two.
@@ -476,6 +494,54 @@ def _port_edges(evidence: dict, by_mac: dict, known: set, already: set) -> list:
             out.append({'from': pair[0], 'to': pair[1], 'kind': 'port',
                         'ports': {sw_uid: str(name)}, 'by': [sw_uid], 'confirmed': False})
     return out
+
+
+def _down_edges(down: dict, aliases: dict, by_name: dict, known: set, links: dict) -> list:
+    """The cables that WERE there: a port that is down and is described as going to a machine.
+
+    A link that stops carrying traffic disappears from the picture in the worst possible way —
+    both neighbour tables age it out, so the map simply has one line fewer, and a missing line
+    reads as nothing at all. Reported from the demo: CORE-2's uplink to CORE-1 down, a server
+    whose NIC lost its link, and the map looking exactly like a healthy one.
+
+    What survives is the port: it is still there, administratively up and operationally down,
+    and it still carries the description somebody gave it — on most networks the name of
+    whatever is at the other end. Both are the device's own statements, so the edge is one:
+    ``kind: 'down'``, with the port(s) at each end that said so. A description that names no
+    machine of this fleet says nothing, and a port with none is not guessed at.
+
+    A pair that still has a LIVE cable keeps it, and the dead member is recorded on it as
+    ``down`` — one cable out of a four-cable trunk is a degraded link, not a missing one.
+    """
+    out: dict = {}
+    for uid in sorted(down):
+        for port in sorted(down.get(uid) or ()):
+            target = None
+            for form in _name_forms((aliases.get(uid) or {}).get(port)):
+                target = by_name.get(form)
+                if target:
+                    break
+            if not target or target == uid or target not in known or uid not in known:
+                continue
+            pair = tuple(sorted((uid, target)))
+            if pair in links:
+                live = links[pair]
+                live.setdefault('down', {}).setdefault(uid, [])
+                if port not in live['down'][uid]:
+                    live['down'][uid].append(port)
+                live['state'] = 'degraded'
+                continue
+            edge = out.setdefault(pair, {'from': pair[0], 'to': pair[1], 'kind': 'down',
+                                         'state': 'down', 'ports': {}, 'by': [],
+                                         'confirmed': False, 'bundle': 1})
+            edge['ports'].setdefault(uid, [])
+            if port not in edge['ports'][uid]:
+                edge['ports'][uid].append(port)
+            if uid not in edge['by']:
+                edge['by'].append(uid)
+            # Both ends saying their port to the other is down is as sure as this gets.
+            edge['confirmed'] = len(edge['by']) > 1
+    return [out[k] for k in sorted(out)]
 
 
 def _name_forms(name) -> tuple:

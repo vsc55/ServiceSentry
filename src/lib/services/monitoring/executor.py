@@ -59,6 +59,17 @@ def _save_lock_of(monitor) -> threading.Lock:
         return cur
 
 
+
+def _write_history(history, records) -> None:
+    """The samples of a run, in batches when the store can (`HistoryStore.record_many`): a
+    commit per sample was most of a fleet's cycle on SQLite."""
+    many = getattr(type(history), 'record_many', None)
+    if callable(many):
+        history.record_many(records)
+        return
+    for _r in records:
+        history.record(*_r)
+
 def run_checks(monitor, module_names, *, timeout: int, history=None,
                progress_cb=None, lang: str = '', only_device: str = '') -> tuple[dict, list]:
     """Run *module_names* on *monitor* concurrently and return ``(results, errors)``.
@@ -195,8 +206,7 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
                     # boundary is written once — by the flush or by itself, never by neither.
                     if _flushed.is_set():
                         if history:
-                            for _r in _recs:
-                                history.record(*_r)
+                            _write_history(history, _recs)
                     else:
                         _hist_records.extend(_recs)
                 items = {
@@ -386,8 +396,7 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     with _hist_lock:
         _flushed.set()
         if history:
-            for _mod, _key, _status, _data in _hist_records:
-                history.record(_mod, _key, _status, _data)
+            _write_history(history, _hist_records)
         _hist_records.clear()
 
     # Flush the cycle's buffered alerts once, grouped per channel (+ summary). All

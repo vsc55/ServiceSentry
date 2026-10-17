@@ -257,3 +257,40 @@ def rsyslog_utc(epoch) -> str:
     """A unix time as rsyslog's `date-pgsql` (and the store, in UTC) writes it."""
     from datetime import datetime, timezone  # noqa: PLC0415
     return datetime.fromtimestamp(epoch, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+
+# ── The catalogue's Models list, sorted on the server ───────────────────────
+# Four models whose every sortable column orders them differently, with one blank of each (a
+# maker, a class, a height of 0, an import date) that has to go LAST both ways, and «written by
+# hand» spelled the two ways it exists (`''` and `manual`). ASCII and one letter apart at the
+# start, so no engine's collation can argue about it. Used by the SQLite route tests and the
+# live-engine ones: the same rows, the same answers.
+CATALOG_SORT_INSERT = ('INSERT INTO {table} (uid, manufacturer, model, u_tenths, kind, source, '
+                       'imported_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+CATALOG_SORT_ROWS = (
+    ('sA', 'Delta', 'm2', 20, 'switch', 'library', '2026-01-02T00:00:00Z'),
+    ('sB', 'alpha', 'M1', 10, 'server', 'zeta', '2026-01-01T00:00:00Z'),
+    ('sC', 'Charlie', 'm3', 0, '', '', ''),
+    ('sD', '', 'm4', 40, 'pdu', 'manual', '2026-01-03T00:00:00Z'),
+)
+#: ``{sort key: (ascending uids, descending uids)}``.
+CATALOG_SORT_EXPECT = {
+    'maker':    (['sB', 'sC', 'sA', 'sD'], ['sA', 'sC', 'sB', 'sD']),
+    'model':    (['sB', 'sA', 'sC', 'sD'], ['sD', 'sC', 'sA', 'sB']),
+    'u':        (['sB', 'sA', 'sD', 'sC'], ['sD', 'sA', 'sB', 'sC']),
+    'kind':     (['sD', 'sB', 'sA', 'sC'], ['sA', 'sB', 'sD', 'sC']),
+    'source':   (['sA', 'sD', 'sC', 'sB'], ['sB', 'sD', 'sC', 'sA']),
+    'imported': (['sB', 'sA', 'sD', 'sC'], ['sD', 'sA', 'sB', 'sC']),
+}
+
+
+def wait_job(client, job_id: str, url: str = '/api/v1/dcim/demo/jobs/', timeout: float = 120.0):
+    """Poll a background job through its route until it is done; its last answer. For the
+    tests of a route that answers with a job id (the demo's install, update and removal)."""
+    import time                                                     # noqa: PLC0415
+    fin = time.time() + timeout
+    while True:
+        job = (client.get(url + str(job_id)).get_json() or {}).get('job') or {}
+        if job.get('done') or time.time() > fin:
+            return job
+        time.sleep(0.05)

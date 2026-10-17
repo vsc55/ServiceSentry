@@ -261,13 +261,20 @@ class TestTheClassesTabIsWiredEverywhereItHasToBe:
         assert "render: 'renderDeviceTypes'" in js, 'the sub-tab calls a function nothing defines'
         assert "selectableRow:" in js, 'a class in use would become selectable'
 
-    def test_and_the_inventory_catalogue_points_at_it(self):
-        """It is not where they live — that catalogue describes equipment in general — but it is
-        where somebody goes looking for a catalogue. A link, not a second copy of the screen."""
+    def test_and_it_sits_beside_the_library_in_the_catalogue(self):
+        """It is not where they live — the library describes equipment in general — but it is
+        where somebody goes looking for a catalogue. The library used to carry a link to it in
+        its row of tabs; the tabs are the library's sidebar views now, and the device classes
+        are an entry of the SAME sidebar group, one line away. A link to a neighbour in the menu
+        is the menu twice, so it went — and this pins that the neighbour is still there."""
+        from lib.web_admin.constants import PANEL_TABS, standalone_page
+        devtypes = [t for t in PANEL_TABS if t['id'] == 'devtypes']
+        assert devtypes and devtypes[0].get('group') == 'catalog'
+        lib = standalone_page('models')
+        assert lib and lib['standalone'].get('placement') == 'catalog'
         cat = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'dcim',
                                  '_catalog.html'))
-        # El DESTINO de la navegación, no la palabra suelta.
-        assert "_navTab('#tab-devtypes')" in cat
+        assert "_navTab('#tab-devtypes')" not in cat, 'the link to a menu neighbour is back'
 
 
 class TestTheClassesScreenIsWiredToItsOwnMarkup:

@@ -7,7 +7,8 @@
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},
-        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50}
+        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50},
+        "simulated_interval": {"type": "int", "default": 300, "min": 0, "max": 3600}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
     "__device_profile__": {"key": "snmp", "address_field": "host"},

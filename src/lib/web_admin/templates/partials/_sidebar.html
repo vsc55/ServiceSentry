@@ -113,7 +113,9 @@
                     </button>
                     <ul class="ss-sb-flyout">
                         {% for v in p.views %}
-                        <li>
+                        {# `data-nav-perm` when the VIEW asks for more than its section: the
+                           same reveal-by-permission pass that governs every other entry hides it. #}
+                        <li{% if v.perm %} data-nav-perm="{{ v.perm }}" style="display:none"{% endif %}>
                             {# `data-subtab` on purpose: the single-highlight and breadcrumb
                                machinery already keys on it, and a second mechanism for the
                                same job is how two of them end up disagreeing. #}
@@ -123,6 +125,9 @@
                                     title="{{ v.label }}">
                                 <i class="bi {{ v.icon }} ss-sb-icon"></i>
                                 <span class="ss-sb-label">{{ v.label }}</span>
+                                {# A count beside the view, for a section that has one to give
+                                   (`_sbSetViewCounts`); empty, and invisible, until it is filled. #}
+                                <span class="ss-sb-vcount" data-sb-vcount="{{ p.id }}-{{ v.slug }}"></span>
                             </button>
                         </li>
                         {% endfor %}
@@ -261,7 +266,9 @@
                             </button>
                             <ul class="ss-sb-flyout">
                                 {% for v in t.views %}
-                                <li>
+                                {# `data-nav-perm` when the VIEW asks for more than its section: the
+                                   same reveal-by-permission pass that governs every other entry hides it. #}
+                                <li{% if v.perm %} data-nav-perm="{{ v.perm }}" style="display:none"{% endif %}>
                                     {# `data-subtab` again: one highlight machinery, keyed the
                                        way it is keyed everywhere else. #}
                                     <button type="button" class="ss-sb-item ss-sb-subsub"
@@ -270,6 +277,7 @@
                                             title="{{ v.label }}">
                                         <i class="bi {{ v.icon }} ss-sb-icon"></i>
                                         <span class="ss-sb-label">{{ v.label }}</span>
+                                        <span class="ss-sb-vcount" data-sb-vcount="{{ t.id }}-{{ v.slug }}"></span>
                                     </button>
                                 </li>
                                 {% endfor %}

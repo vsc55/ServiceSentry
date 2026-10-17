@@ -30,6 +30,7 @@ Rutas:
     POST    /api/v1/dcim/catalog/import
     GET     /api/v1/dcim/catalog/import/<job_id>
     GET     /api/v1/dcim/catalog/suggest
+    GET     /api/v1/dcim/catalog/summary
     POST    /api/v1/dcim/catalog/upload
     GET     /api/v1/dcim/export
     GET     /api/v1/dcim/files/<uid>
@@ -50,6 +51,7 @@ from datetime import datetime, timezone
 from flask import Response, jsonify, request
 
 from lib.core.dcim import basics as dcim_basics
+from lib.core.dcim import brands as dcim_brands
 from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import connectors as dcim_connectors
 from lib.core.dcim import files as dcim_files
@@ -65,6 +67,100 @@ from lib.core.dcim.routes._common import _EXPORT_MAX
 
 def register(app, wa, C):
     """Las rutas de esta área. *C* es lo que comparten todas: los permisos y los ayudantes."""
+
+    def _usage_maps() -> tuple:
+        """``(colocados, en_plantillas)`` — ``{type_uid: n}`` de lo colocado que este lector
+        puede ver, y de en cuántas plantillas sale cada modelo. Quien llama ya comprobó
+        `dcim_view`: esto es el inventario contestando, no el catálogo."""
+        store = C.store()
+        colocados = (dcim_brands.placed_counts(store, store.owners_map(), C.seen())
+                     if store is not None else {})
+        plantillas = C.builds()
+        return colocados, (plantillas.type_counts() if plantillas is not None else {})
+
+    def _catalog_filters(args, usados=None) -> dict:
+        """Los filtros de la lista de modelos, como ``{nombre: (sql, params)}``.
+
+        Por nombre y no como una lista ya unida, porque no todo obedece a todo: la rejilla de
+        marcas no se filtra por la marca, y los botones de forma no se filtran por la forma.
+        *usados* es el conjunto de modelos colocados o en plantillas — ``None`` cuando el lector
+        no puede preguntarlo, y entonces el filtro «sin usar» no se aplica en vez de mentir.
+        """
+        f: dict = {}
+        q = str(args.get('q') or '').strip().lower()
+        if q:
+            # También en la descripción: un armario se llama `AR3100` y lo que alguien
+            # escribe en el buscador es «42U», que solo está ahí.
+            f['q'] = ('(LOWER(manufacturer) LIKE ? OR LOWER(model) LIKE ? '
+                      'OR LOWER(description) LIKE ?)', (f'%{q}%',) * 3)
+        maker = str(args.get('maker') or '').strip()
+        if maker:
+            f['maker'] = ('manufacturer = ?', (maker,))
+        # Y por el fabricante como FILA, que es lo que sigue siendo cierto después de
+        # renombrarlo: acotar por el texto dejaría de encontrar sus modelos el día que «HP» pase
+        # a ser «Hewlett Packard Enterprise». `none` es «la marca escrita sin ficha».
+        brand_uid = str(args.get('brand_uid') or '').strip()
+        if brand_uid == 'none':
+            f['brand_uid'] = (dcim_catalog.CatalogStore.FLAG_SQL['brand'], ())
+        elif brand_uid:
+            f['brand_uid'] = ('brand_uid = ?', (brand_uid,))
+        kind = str(args.get('kind') or '').strip()
+        if kind:
+            f['kind'] = ('kind = ?', (kind,))
+        # One model by its uid: a screen outside the library —a rack's header— opening the
+        # sheet of the model it names, without paging through the catalogue to find it.
+        uno = str(args.get('uid') or '').strip()
+        if uno:
+            f['uid'] = ('uid = ?', (uno,))
+        # De qué FORMA: dispositivo, módulo, armario o componente. Es el filtro de primer nivel,
+        # porque nadie busca «un armario o un DIMM»: se viene sabiendo cuál de las cuatro cosas
+        # se quiere, y sin él los componentes comparten tabla con ocho mil dispositivos.
+        arbol = str(args.get('tree') or '').strip()
+        if arbol in dcim_catalog.TREES:
+            f['tree'] = ('tree = ?', (arbol,))
+        # De dónde vino: un origen por su nombre, o `manual` — lo escrito aquí, que incluye lo de
+        # antes de que existieran los orígenes.
+        origen = str(args.get('source') or '').strip()
+        if origen == MANUAL_SOURCE:
+            f['source'] = (dcim_catalog.CatalogStore.FLAG_SQL['manual'], ())
+        elif origen:
+            f['source'] = ('source = ?', (origen,))
+        # Los de la calidad de los datos: cada cifra del resumen lleva a la lista con su filtro.
+        if str(args.get('img') or '') == 'none':
+            f['img'] = (dcim_catalog.CatalogStore.FLAG_SQL['img'], ())
+        if str(args.get('ports') or '') == 'none':
+            f['ports'] = (dcim_catalog.CatalogStore.FLAG_SQL['ports'], ())
+        # Una importación: su origen y el instante con el que escribió todas sus filas.
+        tanda = str(args.get('import') or '')
+        if '@' in tanda:
+            fuente, cuando = tanda.split('@', 1)
+            f['import'] = ('(source = ? AND imported_at = ?)', (fuente, cuando))
+        if args.get('unused') and usados is not None:
+            uids = sorted(usados)
+            # A trozos, unidos con AND: un `NOT IN` de miles de marcadores pasa del tope de
+            # algún motor en una sola lista, y el AND de varios dice exactamente lo mismo.
+            trozos = [uids[i:i + 400] for i in range(0, len(uids), 400)]
+            if trozos:
+                f['unused'] = (' AND '.join(
+                    f"uid NOT IN ({', '.join('?' for _ in t)})" for t in trozos),
+                    tuple(u for t in trozos for u in t))
+            else:
+                f['unused'] = ('1 = 1', ())
+        return f
+
+    def _join_filters(filtros: dict, *sin) -> tuple:
+        """``(where, params)`` de los filtros, menos los nombrados en *sin*."""
+        partes = [(sql, p) for k, (sql, p) in filtros.items() if k not in sin]
+        return (' AND '.join(sql for sql, _p in partes),
+                tuple(x for _sql, p in partes for x in p))
+
+    def _kind_icons() -> dict:
+        """``{kind: icon}`` for the catalogue classes the plans draw with an icon of their own."""
+        from lib.core.dcim import plankinds as dcim_plankinds        # noqa: PLC0415
+        planos = dcim_plankinds.all_kinds(wa)
+        return {k: str(planos[k].get('icon') or '') for k in dcim_catalog.KINDS
+                if k in planos and planos[k].get('device') and planos[k].get('icon')}
+
     @app.route('/api/v1/dcim/catalog', methods=['GET'])
     @C.catalog_view_req
     def api_dcim_catalog():
@@ -74,62 +170,61 @@ def register(app, wa, C):
         # ver la suya y no la de NetBox en el hueco donde va a pulsar.
         if cat is None:
             return jsonify({'types': [], 'makers': [], 'library_url': _library_url()})
-        q = str(request.args.get('q') or '').strip().lower()
-        maker = str(request.args.get('maker') or '').strip()
-        kind = str(request.args.get('kind') or '').strip()
         # Una página y no todo: seis mil filas en una tabla no las lee nadie, y mandarlas
         # cuesta lo mismo que si alguien fuera a leerlas.
         try:
             offset = max(0, int(request.args.get('offset') or 0))
         except (TypeError, ValueError):
             offset = 0
-        donde, params = [], []
-        if q:
-            # También en la descripción: un armario se llama `AR3100` y lo que alguien
-            # escribe en el buscador es «42U», que solo está ahí.
-            donde.append('(LOWER(manufacturer) LIKE ? OR LOWER(model) LIKE ? '
-                         'OR LOWER(description) LIKE ?)')
-            params += [f'%{q}%', f'%{q}%', f'%{q}%']
-        if maker:
-            donde.append('manufacturer = ?')
-            params.append(maker)
-        # Y por el fabricante como FILA, que es lo que sigue siendo cierto después de
-        # renombrarlo: acotar por el texto dejaría de encontrar sus modelos el día que «HP» pase
-        # a ser «Hewlett Packard Enterprise».
-        brand_uid = str(request.args.get('brand_uid') or '').strip()
-        if brand_uid:
-            donde.append('brand_uid = ?')
-            params.append(brand_uid)
-        if kind:
-            donde.append('kind = ?')
-            params.append(kind)
-        # De qué FORMA: dispositivo, módulo, armario o componente. Es el filtro de primer nivel,
-        # porque nadie busca «un armario o un DIMM»: se viene sabiendo cuál de las cuatro cosas
-        # se quiere, y sin él los componentes comparten tabla con ocho mil dispositivos.
-        arbol = str(request.args.get('tree') or '').strip()
-        if arbol in dcim_catalog.TREES:
-            donde.append('tree = ?')
-            params.append(arbol)
-        where = ' AND '.join(donde)
-        # La rejilla de marcas obedece al TIPO y a nada más: el fabricante no se filtra a sí
-        # mismo, y lo que se escribe en el buscador acota modelos en una vista y nombres de
-        # marca en la otra — que la rejilla filtra por su cuenta, sin ir al servidor.
-        donde_marcas, params_marcas = [], []
-        if kind:
-            donde_marcas.append('kind = ?')
-            params_marcas.append(kind)
-        if arbol in dcim_catalog.TREES:
-            donde_marcas.append('tree = ?')
-            params_marcas.append(arbol)
-        donde_marcas = ' AND '.join(donde_marcas)
-        params_marcas = tuple(params_marcas)
-        rows = cat.list(where, tuple(params), limit=PAGE, offset=offset)
+        # The page size the table asks for, at most PAGE; absent, unreadable or not positive is
+        # PAGE, which is what every other caller of this route has always had.
+        try:
+            limite = int(request.args.get('limit') or PAGE)
+        except (TypeError, ValueError):
+            limite = PAGE
+        limite = PAGE if limite <= 0 else min(PAGE, limite)
+        # The column to sort by, from the store's whitelist: an unknown one is the default
+        # order, not an error — a link saved before a column was renamed still opens the list.
+        orden = str(request.args.get('sort') or '').strip()
+        if orden not in dcim_catalog.CatalogStore.SORTS:
+            orden = ''
+        bajando = bool(orden) and str(request.args.get('dir') or '').lower() == 'desc'
+        # Lo colocado, sólo si hace falta —para la columna o para el filtro «sin usar»— y sólo
+        # a quien puede ver el inventario: esto se lee con el permiso del CATÁLOGO, y contar
+        # equipos colocados es contestar sobre el inventario (la misma regla que las marcas).
+        con_uso = 'dcim_view' in C.perms()
+        quiere_uso = con_uso and bool(request.args.get('placed') or request.args.get('unused'))
+        colocados, en_plantillas = {}, {}
+        if quiere_uso:
+            colocados, en_plantillas = _usage_maps()
+        filtros = _catalog_filters(request.args, (set(colocados) | set(en_plantillas))
+                                   if quiere_uso else None)
+        where, params = _join_filters(filtros)
+        # La rejilla de marcas obedece a TODOS los filtros menos al de la marca misma: el
+        # buscador busca MODELOS en las dos vistas, y cada tarjeta dice cuántos de esa marca
+        # coinciden. Antes buscaba nombres de marca en una vista y modelos en la otra — la misma
+        # caja diciendo dos cosas según qué botón estuviera pulsado.
+        donde_marcas, params_marcas = _join_filters(filtros, 'maker', 'brand_uid')
+        rows = cat.list(where, params, limit=limite, offset=offset, sort=orden, desc=bajando)
+        if quiere_uso and request.args.get('placed'):
+            for r in rows:
+                r['placed'] = colocados.get(str(r.get('uid')), 0)
+                r['in_builds'] = en_plantillas.get(str(r.get('uid')), 0)
         # El total ANTES de recortar: es la diferencia entre «hay doscientos» y «se están
         # enseñando doscientos de seis mil», y solo la segunda es cierta.
         esquemas = getattr(wa, '_dcim_schemas', None)
+        arbol = str(request.args.get('tree') or '').strip()
+        # Los botones de forma cuentan lo que dejan los OTROS filtros, y el total del catálogo
+        # entero va aparte (`counts.models`), que es lo que dice la entrada del menú.
+        arb_where, arb_params = _join_filters(filtros, 'tree')
         return jsonify({'types': rows, 'makers': cat.makers(donde_marcas, params_marcas),
-                        'total': cat.count(where, tuple(params)),
-                        'offset': offset, 'limit': PAGE,
+                        'total': cat.count(where, params),
+                        'offset': offset, 'limit': limite,
+                        # The order applied, so a client can tell an ignored key from its own.
+                        'sort': orden, 'dir': 'desc' if bajando else 'asc',
+                        # Si este lector puede preguntar por lo colocado: sin `dcim_view` la
+                        # columna y el filtro «sin usar» no se ofrecen, en vez de contestar cero.
+                        'usage': con_uso,
                         # Qué orígenes hay, para poder vaciar uno sin teclear su nombre:
                         # equivocarse en una letra vacía cero modelos y no lo dice nadie.
                         'sources': [{'name': n, 'count': c} for n, c in cat.sources()],
@@ -141,6 +236,10 @@ def register(app, wa, C):
                         # para corregir una fila hace falta poder elegir una que todavía no
                         # usa nadie, y escribir la lista en la pantalla sería tenerla dos veces.
                         'all_kinds': list(dcim_catalog.KINDS),
+                        # The icon of each class that has one in the panel: the room equipment
+                        # —a PC, a phone, an AP…— is drawn on the plans with its own, and the
+                        # library's «Type» shows the same one, from the plans' catalogue.
+                        'kind_icons': _kind_icons(),
                         # Y el vocabulario de CADA árbol, porque no es el mismo: un DIMM no es
                         # «switch, servidor u otro». Servido desde aquí y no escrito en la
                         # pantalla, que es como una lista acaba estando en dos sitios y
@@ -163,13 +262,15 @@ def register(app, wa, C):
                                                                       'lifecycle'),
                         'component_size': (dcim_profiles.effective(C.profiles()).get('size')
                                            or {}),
-                        'tree_counts': [{'name': n, 'count': c} for n, c in cat.trees()],
+                        'tree_counts': [{'name': n, 'count': c}
+                                        for n, c in cat.trees(arb_where, arb_params)],
                         # Cuánto hay detrás de cada pestaña. Servidos aquí y no pedidos al abrir
                         # cada una: un número que solo aparece después de entrar no contesta la
                         # pregunta que hace un número en una pestaña, y uno que aparece o no
                         # según por dónde se haya pasado es peor — es el mismo fallo que la
                         # columna Plataforma de las plantillas.
                         'counts': {
+                            'models': cat.count(),
                             'brands': len(cat.brands.list()),
                             'platforms': len(C.platforms().list()) if C.platforms() else 0,
                             'schemas': len(esquemas.list()) if esquemas else 0,
@@ -189,6 +290,100 @@ def register(app, wa, C):
                         'signals': dcim_connectors.signals(wa._lang(), C.conns()),
                         'library_trees': list(dcim_catalog.LIBRARY_TREES),
                         'library_url': _library_url()})
+
+    #: Cuánto antes del fin de soporte se avisa de que caduca: seis meses, que es lo que tarda
+    #: de verdad en aprobarse y hacerse una migración de sistema.
+    SOON_DAYS = 182
+
+    @app.route('/api/v1/dcim/catalog/summary', methods=['GET'])
+    @C.catalog_view_req
+    def api_dcim_catalog_summary():
+        """Cómo está la biblioteca, en una respuesta: lo que dibuja su «Resumen».
+
+        Cada cifra es un filtro de una lista y se cuenta con la MISMA condición que ese filtro
+        (`CatalogStore.FLAG_SQL`, `_catalog_filters`): una cifra que no coincide con la lista a la
+        que lleva es peor que ninguna. Unas pocas consultas agrupadas y no una por fila.
+
+        Lo instalado —marcas en uso, modelos sin usar— sólo a quien tiene `dcim_view` y contado
+        sobre lo que puede ver, como en la lista de marcas; sin él va `null`, que se lee «no se
+        sabe» y no «cero». Las importaciones, sólo a quien gestiona el catálogo.
+        """
+        from datetime import timedelta                    # noqa: PLC0415
+        cat = getattr(wa, '_dcim_catalog', None)
+        perms = C.perms()
+        con_uso = 'dcim_view' in perms
+        hoy = datetime.now(timezone.utc).date()
+        pronto = hoy + timedelta(days=SOON_DAYS)
+        vacio = {'models': {'total': 0, 'trees': []},
+                 'brands': {'total': 0, 'in_use': None},
+                 'platforms': {'total': 0, 'gone': 0, 'soon': 0, 'expiring': []},
+                 'connectors': {'total': 0, 'families': 0},
+                 'quality': {'no_image': 0, 'no_ports': 0, 'no_brand': 0, 'manual': 0,
+                             'unused': None},
+                 'imports': None, 'in_use_brands': None, 'usage': con_uso,
+                 'today': hoy.isoformat(), 'soon_until': pronto.isoformat()}
+        if cat is None:
+            return jsonify(vacio)
+        calidad = cat.quality()
+        out = dict(vacio)
+        out['models'] = {'total': calidad['total'],
+                         'trees': [{'name': n, 'count': c} for n, c in cat.trees()]}
+        out['quality'] = {k: calidad[k] for k in ('no_image', 'no_ports', 'no_brand', 'manual')}
+        out['quality']['unused'] = None
+        marcas = cat.brands.list()
+        out['brands'] = {'total': len(marcas), 'in_use': None}
+        if con_uso:
+            store = C.store()
+            colocados, plantillas = _usage_maps()
+            w, p = _join_filters(_catalog_filters({'unused': '1'},
+                                                  set(colocados) | set(plantillas)))
+            out['quality']['unused'] = cat.count(w, p)
+            uso = (dcim_brands.usage(store, cat, store.owners_map(), C.seen())
+                   if store is not None else {})
+            en_uso = [m for m in marcas if (uso.get(str(m['uid'])) or {}).get('items')]
+            out['brands']['in_use'] = len(en_uso)
+            out['in_use_brands'] = [{'uid': m['uid'], 'name': m.get('name') or '',
+                                     'support_url': m.get('support_url') or '',
+                                     'items': uso[str(m['uid'])]['items']}
+                                    for m in sorted(en_uso, key=lambda m: -uso[str(
+                                        m['uid'])]['items'])][:8]
+        # El fin de soporte de cada plataforma (`eol`, la fecha «Fin de soporte» de su ficha): se
+        # compara como texto ISO, que ordena igual que la fecha — y es como se guarda.
+        plats = C.platforms()
+        usos = (C.builds().platform_counts() if C.builds() is not None else {})
+        nombres = {str(m['uid']): str(m.get('name') or '') for m in marcas}
+        filas = plats.list() if plats is not None else []
+        caducan = []
+        n_gone = n_soon = 0
+        for pl in filas:
+            fin = str(((pl.get('extra') or {}) if isinstance(pl.get('extra'), dict)
+                       else {}).get('eol') or '')[:10]
+            if not fin:
+                continue
+            estado = 'gone' if fin <= hoy.isoformat() else (
+                'soon' if fin <= pronto.isoformat() else '')
+            if not estado:
+                continue
+            n_gone += estado == 'gone'
+            n_soon += estado == 'soon'
+            caducan.append({'uid': pl['uid'], 'name': pl.get('name') or '', 'eol': fin,
+                            'state': estado, 'builds': usos.get(str(pl['uid']), 0),
+                            'brand': nombres.get(str(pl.get('brand_uid') or ''), '')})
+        # Lo que caduca PRONTO primero —es lo que todavía se puede planificar—, de la más cercana
+        # a la más lejana; detrás, lo que ya se quedó sin soporte, lo más reciente antes: una
+        # plataforma muerta hace cuatro años no es noticia, y una de la semana pasada sí.
+        orden = (lambda x: (x['eol'], x['name'].lower()))
+        caducan = (sorted((x for x in caducan if x['state'] == 'soon'), key=orden)
+                   + sorted((x for x in caducan if x['state'] == 'gone'), key=orden,
+                            reverse=True))
+        out['platforms'] = {'total': len(filas), 'gone': n_gone, 'soon': n_soon,
+                            'expiring': caducan[:8]}
+        out['connectors'] = {'total': dcim_connectors.count(C.conns()),
+                             'families': len(dcim_connectors.by_family(wa._lang(), C.conns()))}
+        if 'dcim_catalog_manage' in perms:
+            out['imports'] = [{'source': s, 'at': at, 'count': n, 'key': f'{s}@{at}'}
+                              for s, at, n in cat.imports(6)]
+        return jsonify(out)
 
     @app.route('/api/v1/dcim/catalog/suggest', methods=['GET'])
     @C.catalog_view_req

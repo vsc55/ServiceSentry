@@ -17,7 +17,7 @@ import shutil
 import pytest
 
 from tests.conftest import _login                                   # noqa: E402
-from tests.helpers import node_run, panel_bundle                    # noqa: E402
+from tests.helpers import node_run, panel_bundle, wait_job          # noqa: E402
 
 try:
     import flask                                                    # noqa: F401
@@ -35,22 +35,30 @@ class TestTheDemoFromMaintenance:
         _login(client)
         c = client
         apuntado = []
-        audit0 = admin._audit
-        monkeypatch.setattr(admin, '_audit', lambda ev, **kw: (apuntado.append(ev), audit0(ev, **kw))[1])
+        # Written by the job when it ends, on its thread: through `_audit_write`, with who
+        # asked read while there was a request.
+        audit0 = admin._audit_write
+        monkeypatch.setattr(admin, '_audit_write',
+                            lambda ev, *a, **kw: (apuntado.append(ev), audit0(ev, *a, **kw))[1])
         # Something of somebody's own, that removing the demo must not touch.
         mio = c.post('/api/v1/dcim/sites', json={'name': 'Sede propia'}).get_json()['uid']
 
-        assert c.get('/api/v1/dcim/demo').get_json() == {'installed': False, 'sites': []}
+        antes = c.get('/api/v1/dcim/demo').get_json()
+        assert antes['installed'] is False and antes['sites'] == [] and antes['job'] is None
+        # In the background: the answer is a job, and the job carries the counts at the end.
         r = c.post('/api/v1/dcim/demo', json={})
-        assert r.status_code == 200 and r.get_json()['ok'], r.get_json()
-        assert r.get_json()['counts']['racks'] > 0
+        assert r.status_code == 202 and r.get_json()['ok'], r.get_json()
+        fin = wait_job(c, r.get_json()['job'])
+        assert fin['done'] and not fin['error'] and fin['result']['counts']['racks'] > 0
         estado = c.get('/api/v1/dcim/demo').get_json()
         assert estado['installed'] and len(estado['sites']) >= 1
         assert c.post('/api/v1/dcim/demo', json={}).status_code == 409, 'not twice unless asked'
-        assert c.post('/api/v1/dcim/demo', json={'replace': True}).status_code == 200
+        r = c.post('/api/v1/dcim/demo', json={'replace': True})
+        assert r.status_code == 202 and not wait_job(c, r.get_json()['job'])['error']
 
         r = c.delete('/api/v1/dcim/demo')
-        assert r.status_code == 200 and r.get_json()['removed'] >= 1
+        assert r.status_code == 202
+        assert wait_job(c, r.get_json()['job'])['result']['removed'] >= 1
         assert c.get('/api/v1/dcim/demo').get_json()['installed'] is False
         assert admin._dcim_store.sites.get(mio), 'removing the demo took a site of somebody else'
         assert c.delete('/api/v1/dcim/demo').get_json()['removed'] == 0
@@ -71,7 +79,7 @@ __out = {};
 const preguntas = [], envios = [], avisos = [];
 showConfirmModal = (texto, si) => { preguntas.push(texto); return si(); };
 showToast = (texto, tipo) => avisos.push(tipo);
-_dcimSend = (m, u, b) => { envios.push([m, u, b]); return Promise.resolve({ok: true, data: {removed: 2}}); };
+_dcimSend = (m, u, b) => { envios.push([m, u, b]); return Promise.resolve({ok: true, data: {removed: 0}}); };
 apiGet = () => Promise.resolve({installed: true});
 _dcimPlan = {room: {uid: 'r'}};
 _dcimDemoRemove();

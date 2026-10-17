@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **80 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **81 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -49,7 +49,7 @@ Hay **80 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
-| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_floor_wall` (los muros de una planta, leídos de su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_shelf_item` (lo que hay en cada estantería de un armario), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_floor_wall` (los muros de una planta, leídos de su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_shelf_item` (lo que hay en cada estantería de un armario), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario), `dc_demo` (qué versión de la demostración hay instalada) |
 | Editor de planos | `plan2d_kind` (los objetos que alguien crea desde la pantalla de un plano: un palé, un fichador) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs`, `health_alerts` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
@@ -1037,6 +1037,7 @@ tramo del mismo muro que se deja abierto o con cristal. Se guardan **enteros por
 | asset | TEXT | no | `''` | su número de inventario. El mueble también se compra, y es el que sale por más dinero en el albarán |
 | base_mm | INTEGER | no | `0` | a qué altura del suelo empieza el armario, en mm. `0` = de suelo, casi todos; uno de pared cuelga a 1,2 o 1,8 m. Una columna y no una marca «de pared»: la marca es `base_mm > 0`, y sin la altura no dice dónde poner la escalera. La usan el 3D, que lo levanta, la tarjeta del plano y el fichero del plano |
 | group_uid | TEXT | no | `''` | grupo con el que se mueve junto en el plano de la sala o la planta: un id opaco compartido (`g-` y letras); vacío = sin grupo. El servidor rechaza lo que no case con `^[A-Za-z0-9_-]{0,64}$` |
+| type_uid | TEXT | no | `''` | qué armario del catálogo es (`dc_type`, rama `rack-types`), o vacío. Lo que se compró; sus medidas siguen siendo sus columnas, porque lo medido aquí manda sobre la ficha. La API descarta un uid que no sea un armario del catálogo, y «colocados» de la biblioteca cuenta los armarios por él |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1302,7 +1303,7 @@ nunca borra un armario que tenga algo dentro.
 | u_split | TEXT | no | `'width'` | por dónde se parte: `width` (uno al lado del otro — dos mini PC, ocho Raspberry) o `height` (uno encima del otro — dos patch panel de 0,5 U). A la rejilla le da igual, porque lo que comprueba es si el trozo está libre; al **dibujo** no, que existe para parecerse a lo que se ve al abrir el armario |
 | parent_uid | TEXT | no | `''` | montado **en** otro elemento (los mini PC sobre una bandeja); índice `idx_dc_item_parent`. El que lo lleva ocupa el U y el montado **no**, porque ese U ya está pagado — y hereda su rack, su U, su altura y su cara, para que el alzado y los recuentos sigan leyendo lo mismo sin saber que esto va montado. Un solo nivel: una bandeja sobre una bandeja no es una sala. Y **no se retira lo que lleva algo encima**, porque quitarlo dejaría tres máquinas colgando de un sitio que ya no está |
 | placement | TEXT | no | `'u'` | cómo está puesto: uno de `PLACEMENTS`. `u` se atornilla a los mástiles y ocupa `u_start`..`u_height`; `side` está en el armario sin ocupar U (la regleta del lateral, la bandeja colgada) y `near`, al lado (el SAI en el suelo, el cuadro en la pared). Lo que no ocupa U sigue estando EN el armario para todo lo demás —se alimenta, se cablea, tiene estado— y por eso no entra en la ocupación ni en el alzado |
-| demo_state | TEXT | no | `''` | el estado de un equipo de la DEMO (`main.py dcim demo`): `ok`, `warning` o `error`; vacío en todo lo demás. Solo cuenta si el equipo no tiene dispositivo vinculado —con uno, manda su vigilancia— y ninguna ruta lo escribe: la demo no crea dispositivos ni comprobaciones, y aun así enseña cómo se ve un equipo en aviso o caído |
+| demo_state | TEXT | no | `''` | el estado de un equipo de la DEMO (`main.py dcim demo`): `ok`, `warning` o `error`; vacío en todo lo demás. Solo cuenta si el equipo no tiene dispositivo vinculado —con uno, manda su vigilancia— y ninguna ruta lo escribe. Instalada desde el panel, la demo vincula cada equipo así pintado a un dispositivo con comprobaciones simuladas (`demo_monitor`) y desde entonces manda su vigilancia; desde la línea de órdenes no, y este estado enseña cómo se ve un equipo en aviso o caído |
 | demo_reason | TEXT | no | `''` | por qué está así un equipo de la DEMO: lo que diría la comprobación que lo puso en aviso o caído («Fuente de alimentación 2 sin tensión»). Se enseña al pulsar el equipo, como las comprobaciones que fallan de uno con dispositivo. Mismas reglas que `demo_state` |
 | room_uid | TEXT | no | `''` | la SALA de un equipo que no está en un armario (`placement = 'room'`, `rack_uid` vacío): un PC en su mesa, un teléfono IP, una impresora, un AP en el techo, una roseta de pared. Quién lo ve y quién lo toca siguen a la sala (`DcimStore.chain_of`) |
 | pos_x | REAL | no | `0` | dónde está en su sala, en mm, como una pieza del plano (esquina sin girar) |
@@ -1445,6 +1446,25 @@ nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
 > **La misma forma que `dc_part` a propósito**: crear un equipo desde una plantilla es copiarlas.
 > Lo que NO se copia es el número de serie — es lo único que tiene esa unidad y ninguna otra, y
 > heredarlo serían veinte máquinas con el mismo, que es peor que ninguno.
+
+### `dc_demo` — qué versión de la demostración hay instalada
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| version | INTEGER | no | `0` | la `DEMO_VERSION` del código que la instaló |
+| lang | TEXT | no | `''` | en qué idioma se escribió |
+| installed_at | TEXT | no | `''` | cuándo terminó de instalarse (UTC, ISO 8601) |
+| installed_by | TEXT | no | `''` | quién la instaló |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+> Una fila como mucho: la escribe el final de una instalación y la borra quitar la demo. Es un
+> hecho de los datos de esta base —viaja con su copia y vale igual en los tres motores— y no un
+> ajuste, así que no va en la configuración. Con ella Mantenimiento dice «versión N» y ofrece
+> actualizar cuando el código trae una más nueva; una demo de antes de esta tabla sale como
+> versión desconocida, más vieja que cualquiera.
 
 ### `dc_brand` — las marcas
 

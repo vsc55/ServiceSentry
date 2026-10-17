@@ -3040,8 +3040,11 @@ class TestLosModelosDeComponente:
         # una haría que el número apareciera o no según por dónde se hubiera pasado, que es el
         # mismo fallo que tuvo la columna Plataforma de las plantillas. Un número en una
         # pestaña y no en las demás dice menos que ninguno.
-        assert set(d['counts']) == {'brands', 'platforms', 'schemas', 'connectors'}
+        assert set(d['counts']) == {'models', 'brands', 'platforms', 'schemas', 'connectors'}
         assert d['counts']['brands'] == 2          # Kingston y Dell, de las dos altas de arriba
+        # Y los modelos del catálogo ENTERO, con la forma puesta: es lo que dice la entrada
+        # «Modelos» del menú, que no cambia por estar mirando los componentes.
+        assert d['counts']['models'] == 2 and d['total'] == 1
         assert d['counts']['connectors'] > 50
 
     def test_y_las_marcas_obedecen_al_mismo_filtro(self, client):

@@ -35,6 +35,9 @@ _SERVER_DEFAULTS: dict = {
     **{k: v['default'] for k, v in _SCHEMA['servers'].items()
        if isinstance(v, dict) and 'default' in v},
 }
+# The module's own settings (`__module__`).
+_MODULE_DEFAULTS: dict = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
+                          if isinstance(v, dict) and 'default' in v}
 # checks schema is nested inside servers as a sub_collection
 _CHECK_DEFAULTS: dict  = {k: v['default'] for k, v in _SCHEMA['servers']['checks'].items()
                           if isinstance(v, dict) and 'default' in v}

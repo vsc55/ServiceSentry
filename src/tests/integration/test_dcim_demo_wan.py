@@ -68,8 +68,10 @@ class TestTheSites:
             if key == 'site_za':
                 continue                     # offline on purpose: see TestFarSites
             room = store.rooms_of(made[key])[0]
+            # What answers: not the strips, nor the patch panel, the blanking panels and the
+            # cable manager a small site's rack has as well — passive, nothing to watch.
             activos = [i for k in store.racks_of(room['uid']) for i in store.items_of(k['uid'])
-                       if i['role'] != 'pdu']
+                       if i['role'] not in demo._MUTE]
             estados = [dcim_svc.item_state(i, {}) for i in activos]
             assert '' not in estados, key
             assert estados.count('ok') >= len(estados) - 1, key
@@ -138,7 +140,7 @@ class TestFarSites:
         assert za['timezone'] == 'Africa/Johannesburg'
         room = store.rooms_of(za['uid'])[0]
         activos = [i for k in store.racks_of(room['uid']) for i in store.items_of(k['uid'])
-                   if i['role'] != 'pdu']
+                   if i['role'] not in demo._MUTE]
         assert activos and {dcim_svc.item_state(i, {}) for i in activos} == {'error'}
         assert {i['demo_reason'] for i in activos} == {demo.texts('es_ES')['why_site_offline']}
 

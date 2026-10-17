@@ -49,7 +49,7 @@ def job_status(job_id: str) -> dict | None:
     return {k: v for k, v in job.items() if not k.startswith('_')}
 
 
-def running_job() -> dict | None:
+def running_job(kind: str = 'import') -> dict | None:
     """The import in flight, if there is one — the server's answer, not a browser's memory.
 
     F5 loses the job id and nothing else: the work is a thread here and does not depend on
@@ -57,9 +57,74 @@ def running_job() -> dict | None:
     colleague's laptop, and the person who closed the browser and came back.
     """
     for job in _JOBS.values():
-        if not job.get('done'):
+        if not job.get('done') and job.get('type', 'import') == kind:
             return {k: v for k, v in job.items() if not k.startswith('_')}
     return None
+
+
+def start_demo(action: str, run, *, actor: str = '') -> tuple:
+    """Install, update or remove the demo in the background. Returns ``(job_id, error)``.
+
+    The same jobs as an import —in this process's memory, polled by id, on the jobs screen—
+    for the same reason: the demo writes thousands of rows, too long to hold a request open and
+    long enough that somebody wants to see what it is doing. *run(report)* does the work and
+    returns its result; *report* takes what `demo.Progress` tells it (``{step, step_key,
+    step_no, steps_total, done, total, percent}``) and keeps the current step, the percentage
+    and a log of the steps finished, each with its count and how long it took. A failure keeps
+    the step it happened in (``error_step``).
+
+    **One at a time**: while one runs, a second is refused with ``dcim_demo_busy`` and the
+    caller is given the running one's id — the panel reopens its dialog instead of starting
+    another.
+    """
+    with _LOCK:
+        ya = running_job('demo')
+        if ya:
+            return ya['id'], 'dcim_demo_busy'
+        now = time.time()
+        _prune(now)
+        job_id = uuid.uuid4().hex[:12]
+        job = {'id': job_id, 'type': 'demo', 'action': str(action), 'done': False,
+               'error': '', 'error_step': '', 'error_step_text': '', 'step': '', 'step_key': '', 'step_no': 0,
+               'steps_total': 0, 'percent': 0, 'count': 0, 'total': 0, 'log': [],
+               'result': None, 'started': now, '_started': now, '_step_at': now,
+               '_actor': str(actor or '')}
+        _JOBS[job_id] = job
+
+    def report(ev: dict) -> None:
+        ahora = time.time()
+        clave = str(ev.get('step_key') or '')
+        if clave != job['step_key']:
+            if job['log']:
+                job['log'][-1]['elapsed'] = round(ahora - job['_step_at'], 1)
+            job['log'].append({'key': clave, 'text': str(ev.get('step') or clave),
+                               'done': None, 'total': None, 'elapsed': None})
+            job['_step_at'] = ahora
+        job.update(step_key=clave, step=str(ev.get('step') or clave),
+                   step_no=int(ev.get('step_no') or 0),
+                   steps_total=int(ev.get('steps_total') or 0),
+                   percent=max(job['percent'], int(ev.get('percent') or 0)),
+                   count=ev.get('done'), total=ev.get('total'))
+        job['log'][-1].update(done=ev.get('done'), total=ev.get('total'))
+
+    def _run() -> None:
+        try:
+            job['result'] = run(report)
+            job['percent'] = 100
+        except Exception as exc:                # pylint: disable=broad-except
+            job['error'] = str(exc) or exc.__class__.__name__
+            job['error_step'] = str(getattr(exc, 'demo_step', '') or job['step_key'])
+            job['error_step_text'] = next(
+                (x['text'] for x in reversed(job['log']) if x['key'] == job['error_step']),
+                job['step'])
+        finally:
+            if job['log'] and job['log'][-1]['elapsed'] is None:
+                job['log'][-1]['elapsed'] = round(time.time() - job['_step_at'], 1)
+            job['done'] = True
+            job['_ended'] = time.time()
+
+    threading.Thread(target=_run, name=f'dcim-demo-{job_id}', daemon=True).start()
+    return job_id, ''
 
 
 def start_import(store, source: str, kind: str, path: str, *, actor: str = '',
@@ -162,6 +227,22 @@ def live(_wa) -> list:
     now = time.time()
     out = []
     for jid, job in list(_JOBS.items()):
+        if job.get('type') == 'demo':
+            out.append({
+                'id': jid, 'kind': 'dcim_demo', 'label': str(job.get('action') or ''),
+                'detail': str(job.get('step') or ''),
+                'state': ('failed' if job.get('error') else 'done') if job.get('done')
+                         else 'running',
+                'started': float(job.get('_started') or now),
+                'done': int(job.get('percent') or 0), 'total': 100,
+                'error': str(job.get('error') or ''),
+                'steps': [{'text': str(x.get('text') or ''),
+                           'state': ('running' if x.get('elapsed') is None
+                                     else 'failed' if job.get('error')
+                                     and x is job['log'][-1] else 'ok'),
+                           'n': x.get('done') or 0, 'total': x.get('total') or 0}
+                          for x in job.get('log') or ()]})
+            continue
         out.append({
             'id': jid,
             'kind': 'dcim_catalog',

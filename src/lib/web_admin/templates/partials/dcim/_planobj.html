@@ -191,7 +191,9 @@ async function _dcObjDuplicate(kind, uid) {
         cuerpo = {room_uid: sala, pos_x: (Number(x.pos_x) || 0) + ancho + 200, pos_y: Number(x.pos_y) || 0};
         const copia = k === 'rack'
             ? ['u_height', 'width_mm', 'depth_mm', 'rotation', 'base_mm', 'desc_units',
-               'rail_front_mm', 'rail_depth_mm', 'rail_rear_mm', 'access', 'row_uid']
+               'rail_front_mm', 'rail_depth_mm', 'rail_rear_mm', 'access', 'row_uid',
+               // Y de qué modelo es: la copia de un armario es otro igual, del mismo modelo.
+               'type_uid']
             : ['kind', 'label', 'width_mm', 'depth_mm', 'rotation', 'height_mm', 'base_mm', 'shelves'];
         for (const c of copia) if (x[c] !== undefined && x[c] !== null) cuerpo[c] = x[c];
         if (k === 'rack') cuerpo.name = tf('dcim_rack_copy_name', x.name || '');

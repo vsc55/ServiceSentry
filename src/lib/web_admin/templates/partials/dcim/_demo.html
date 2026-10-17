@@ -1,35 +1,168 @@
 {# ================================================================
    DCIM — los datos de demostración, desde Configuración → Mantenimiento.
 
-   Pedido: una opción en Mantenimiento para añadir o eliminar los datos de demostración. Las dos
-   acciones las declara el inventario (`lib/core/dcim/manifest.py`, `CONFIG_ACTIONS`) y el panel
-   pinta sus botones; éstas son las funciones que nombran. Lo mismo que `main.py dcim demo`
-   (`/api/v1/dcim/demo`): solo se tocan las sedes de la demo.
+   Pedido: una opción en Mantenimiento para añadir o eliminar los datos de demostración, un
+   diálogo que diga qué está haciendo en cada momento, y saber si la demo instalada es la
+   última. Las acciones las declara el inventario (`lib/core/dcim/manifest.py`,
+   `CONFIG_ACTIONS`) y el panel pinta sus botones; éstas son las funciones que nombran. Lo
+   mismo que `main.py dcim demo` (`/api/v1/dcim/demo`): solo se tocan las sedes de la demo.
+
+   Instalar, actualizar y borrar son trabajos de fondo (`/api/v1/dcim/demo/jobs/<id>`): el
+   diálogo enseña el paso, el porcentaje y lo ya hecho; se puede cerrar y volver a abrir
+   mientras sigue, y al terminar avisa. Un segundo clic mientras corre reabre el diálogo.
    ================================================================ #}
 
+//: El trabajo que se está siguiendo: `{id, timer, last}`. Uno a la vez, como en el servidor.
+let _dcDemoJob = null;
+
+/** La línea de estado de la tarjeta «Instalar»: qué versión hay y si esta trae una más nueva,
+ *  con el botón de actualizar cuando la trae. */
+async function _dcimDemoStatus(el) {
+    const d = await apiGet('/api/v1/dcim/demo') || {};
+    if (!el) return d;
+    let html;
+    if (d.job && !d.job.done) {
+        html = `<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>${
+            esc(tf('dcim_demo_running', d.job.step || '', d.job.percent || 0))}</span>
+            <button class="btn btn-sm btn-secondary ms-1" onclick="_dcimDemoWatch(${jsStr(d.job.id)})">
+                ${esc(t('dcim_demo_progress_open'))}</button>`;
+    } else if (d.installed) {
+        const cuando = d.installed_at ? String(d.installed_at).slice(0, 10) : '';
+        html = `<span>${esc(d.installed_version
+            ? tf('dcim_demo_installed_version', d.installed_version, cuando)
+            : t('dcim_demo_installed_unknown'))}</span>${d.outdated ? `
+            <div class="text-warning mt-1">${esc(tf('dcim_demo_newer', d.version))}</div>
+            <button class="btn btn-sm btn-warning mt-1" onclick="_dcimDemoUpdate()">
+                <i class="bi bi-arrow-repeat me-1"></i>${esc(t('dcim_demo_update'))}</button>` : ''}`;
+    } else {
+        html = `<span class="text-muted">${esc(tf('dcim_demo_would_install', d.version))}</span>`;
+    }
+    el.innerHTML = html;
+    return d;
+}
+
 /** Instalar la demo, preguntando antes. Si ya está, la pregunta lo dice: se borra y se crea de
- *  nuevo, y lo que alguien hubiera tocado en ella se pierde. */
+ *  nuevo, y lo que alguien hubiera tocado en ella se pierde. Si ya hay un trabajo, se reabre. */
 async function _dcimDemoInstall() {
     const d = await apiGet('/api/v1/dcim/demo') || {};
+    if (d.job && !d.job.done) { _dcimDemoWatch(d.job.id); return; }
     const ya = !!d.installed;
-    showConfirmModal(t(ya ? 'dcim_demo_reinstall_q' : 'dcim_demo_install_q'), async () => {
-        showToast(t('dcim_demo_installing'), 'info');
-        const r = await _dcimSend('POST', '/api/v1/dcim/demo', {replace: ya});
-        if (!r.ok) { showToast(r.error || t('save_failed'), 'danger'); return; }
-        showToast(t('dcim_demo_installed_ok'), 'success');
-        _dcimDemoForget();
-    });
+    showConfirmModal(t(ya ? 'dcim_demo_reinstall_q' : 'dcim_demo_install_q'),
+                     () => _dcimDemoStart('POST', {replace: ya}));
+}
+
+/** Actualizar la que hay a la versión de este código: se borra y se vuelve a crear. */
+function _dcimDemoUpdate() {
+    showConfirmModal(t('dcim_demo_update_q'), () => _dcimDemoStart('POST', {replace: true}));
 }
 
 /** Borrar la demo, preguntando antes: sus sedes y todo lo que tienen, y nada más. */
 function _dcimDemoRemove() {
-    showConfirmModal(t('dcim_demo_remove_q'), async () => {
-        const r = await _dcimSend('DELETE', '/api/v1/dcim/demo');
-        if (!r.ok) { showToast(r.error || t('save_failed'), 'danger'); return; }
-        const quitadas = Number((r.data || {}).removed) || 0;
-        showToast(t(quitadas ? 'dcim_demo_removed_ok' : 'dcim_demo_none'), quitadas ? 'success' : 'info');
-        _dcimDemoForget();
-    });
+    showConfirmModal(t('dcim_demo_remove_q'), () => _dcimDemoStart('DELETE'));
+}
+
+/** Pedirlo y seguirlo. Sin trabajo que seguir (no había nada que borrar) basta un aviso. */
+async function _dcimDemoStart(metodo, cuerpo) {
+    const r = await _dcimSend(metodo, '/api/v1/dcim/demo', cuerpo);
+    const job = (r.data || {}).job;
+    if (job) { _dcimDemoWatch(job); return; }
+    if (!r.ok) { showToast(r.error || t('save_failed'), 'danger'); return; }
+    showToast(t('dcim_demo_none'), 'info');
+    _dcimDemoForget();
+}
+
+/** Abrir el diálogo de un trabajo y seguirlo hasta que acabe. Cerrar el diálogo no lo para: se
+ *  sigue preguntando y al final avisa; volver a abrirlo es volver a llamar aquí. */
+function _dcimDemoWatch(id) {
+    if (!_dcDemoJob || _dcDemoJob.id !== id) {
+        if (_dcDemoJob && _dcDemoJob.timer) clearTimeout(_dcDemoJob.timer);
+        _dcDemoJob = {id, timer: null, last: null};
+    }
+    // `fit`: a progress report has nothing to show in a bigger box, so no maximise and no
+    // resize handle; the log inside has a fixed height, so the dialog does not grow as it fills.
+    showHtmlModal(t('dcim_demo_progress_title'),
+                  `<div id="dcDemoJob">${_dcimDemoJobHtml(_dcDemoJob.last)}</div>`, 'primary',
+                  '', 'fit');
+    // To the newest step once the dialog is ON SCREEN: while it is still hidden its log has no
+    // height to scroll, and a dialog reopened on a long log showed the oldest lines.
+    const modal = document.getElementById('infoModal');
+    if (modal && !modal.classList.contains('show'))
+        modal.addEventListener('shown.bs.modal', () => _dcimDemoFollow(true), {once: true});
+    else _dcimDemoFollow(true);
+    if (!_dcDemoJob.timer) _dcimDemoPoll();
+}
+
+async function _dcimDemoPoll() {
+    const seguido = _dcDemoJob;
+    if (!seguido) return;
+    const r = await apiGet('/api/v1/dcim/demo/jobs/' + encodeURIComponent(seguido.id));
+    const job = (r || {}).job;
+    if (_dcDemoJob !== seguido) return;
+    if (!job) { _dcDemoJob = null; return; }
+    seguido.last = job;
+    const caja = document.getElementById('dcDemoJob');
+    if (caja) {
+        const seguir = _dcimDemoAtEnd();
+        caja.innerHTML = _dcimDemoJobHtml(job);
+        _dcimDemoFollow(seguir);
+    }
+    if (!job.done) { seguido.timer = setTimeout(_dcimDemoPoll, 700); return; }
+    seguido.timer = null;
+    _dcimDemoFinished(job);
+}
+
+/** Whether the log is scrolled to its last line (or has none yet): only then does a refresh
+ *  carry it down — whoever scrolled up to read a step is not dragged away from it. */
+function _dcimDemoAtEnd() {
+    const log = document.getElementById('dcDemoLog');
+    return !log || log.scrollHeight - log.scrollTop - log.clientHeight < 8;
+}
+
+/** Keep the newest step in sight, as a terminal does, when `seguir`. */
+function _dcimDemoFollow(seguir) {
+    const log = document.getElementById('dcDemoLog');
+    if (log && seguir) log.scrollTop = log.scrollHeight;
+}
+
+/** Al terminar: el aviso, lo que el inventario tuviera abierto se olvida y la tarjeta dice la
+ *  versión nueva. */
+function _dcimDemoFinished(job) {
+    if (job.error) showToast(tf('dcim_demo_failed', job.error), 'danger');
+    else if (job.action === 'remove') {
+        const n = Number((job.result || {}).removed) || 0;
+        showToast(t(n ? 'dcim_demo_removed_ok' : 'dcim_demo_none'), n ? 'success' : 'info');
+    } else showToast(t('dcim_demo_installed_ok'), 'success');
+    _dcimDemoForget();
+    if (typeof _cfgActionStatusFill === 'function') _cfgActionStatusFill();
+}
+
+/** El cuerpo del diálogo: la barra, el paso de ahora con su cuenta, lo ya hecho con su cuenta y
+ *  su tiempo, y el error con el paso en que ocurrió. Aparte para poder probarlo sin pantalla. */
+function _dcimDemoJobHtml(job) {
+    if (!job) return `<div class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>${
+        esc(t('dcim_demo_starting'))}</div>`;
+    const pct = Math.max(0, Math.min(100, Number(job.percent) || 0));
+    const cuenta = (x) => (x.total ? ` (${Number(x.done) || 0}/${Number(x.total)})` : '');
+    const color = job.error ? 'bg-danger' : (job.done ? 'bg-success' : '');
+    const log = (job.log || []).map((x, i) => {
+        const ultimo = i === job.log.length - 1;
+        const icono = job.error && ultimo ? 'bi-x-circle text-danger'
+            : (x.elapsed === null || x.elapsed === undefined) && !job.done
+                ? 'bi-hourglass-split text-primary' : 'bi-check-circle text-success';
+        return `<li class="ss-fs-2"><i class="bi ${icono} me-1"></i>${esc(x.text)}${esc(cuenta(x))}${
+            x.elapsed !== null && x.elapsed !== undefined
+                ? ` <span class="text-muted">· ${esc(String(x.elapsed))} s</span>` : ''}</li>`;
+    }).join('');
+    return `<div class="mb-2 fw-semibold">${esc(t('dcim_demo_action_' + (job.action || 'install')))}</div>
+        <div class="progress mb-2" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0"
+             aria-valuemax="100"><div class="progress-bar ${color}" style="width:${pct}%">${pct}%</div></div>
+        <div class="mb-2">${job.done
+            ? esc(job.error ? tf('dcim_demo_failed_at', job.error_step_text || job.error_step || '', job.error)
+                            : t('dcim_demo_finished'))
+            : esc(tf('dcim_demo_step_of', job.step_no || 0, job.steps_total || 0, job.step || '')
+                  + cuenta({done: job.count, total: job.total}))}</div>
+        <ul id="dcDemoLog" class="list-unstyled mb-0 ss-log-box">${log}</ul>
+        ${job.done ? '' : `<div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_demo_close_hint'))}</div>`}`;
 }
 
 /** Lo que el inventario tuviera abierto de la demo ya no existe, o es otro: se olvida. Las sedes

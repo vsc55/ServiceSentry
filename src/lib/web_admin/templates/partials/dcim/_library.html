@@ -1,0 +1,311 @@
+{# ================================================================
+   DCIM — la biblioteca del Catálogo: sus vistas, su dirección y su cabecera.
+
+   Era una entrada del menú con una fila de pestañas dentro —Marcas, Modelos, Plataformas,
+   Conectores, Esquemas, Importar— y un enlace a «Tipos de dispositivo» que ya estaba en el mismo
+   grupo del menú. Las pestañas no tenían dirección: un enlace pegado en un chat abría la que
+   tocara, y el botón de atrás no volvía de una a otra.
+
+   Ahora es una sección con VISTAS, declarada como las demás (`HOME_PAGES`, id `models`): el
+   menú las despliega con su cuenta al lado, cada una es una dirección
+   (`/catalog/library/brands`), y pulsar «Biblioteca» vuelve a la última que se usó. Esquemas
+   declara su propio permiso —es un documento de quien gestiona— y quien solo lee no la ve.
+
+   **Importar no es una vista**: se hace dos veces al año y su formulario ocupaba una pestaña
+   entera. Es un cuadro que se abre desde el Resumen, los Modelos o la cabecera; mientras dura, la
+   cabecera lleva una píldora con lo que va, y al terminar avisa aunque se haya cerrado el cuadro.
+
+   Aquí: qué vista está pedida (`renderDcLibrary`), cómo se va de una a otra sin recargar
+   (`_dcLibGo`), las direcciones de antes (`?ctab=brands`, `/dcim/catalog`), la cabecera con el
+   buscador de modelos, y el cuadro de importar. Cada vista se pinta en su fichero.
+   ================================================================ #}
+
+//: Cada vista de la dirección, con el nombre que tenía como pestaña — que es el que siguen
+//: usando las funciones de cada vista (`_dcCatTab`).
+const _DCLIB_TAB = {summary: 'summary', brands: 'brands', models: 'list',
+                    platforms: 'platforms', connectors: 'conns', schemas: 'schemas'};
+//: Las pestañas de antes (`?ctab=`) y la vista a la que lleva cada una. «Importar» abre los
+//: Modelos con el cuadro de importar encima: era una pestaña y ahora es un cuadro.
+const _DCLIB_OLD = {list: 'models', brands: 'brands', platforms: 'platforms',
+                    conns: 'connectors', schemas: 'schemas', import: 'models'};
+//: El rótulo de cada vista en la cabecera, del mismo diccionario que el menú.
+const _DCLIB_LABEL = {summary: 'dcim_lib_v_summary', brands: 'dcim_cat_tab_brands',
+                      list: 'dcim_cat_tab_list', platforms: 'dcim_cat_tab_platforms',
+                      conns: 'dcim_cat_tab_conns', schemas: 'dcim_cat_tab_schemas'};
+
+//: Si ya se miró la dirección de llegada: la primera vez se traducen las de antes y se leen los
+//: filtros; después, la dirección la escribe la propia biblioteca.
+let _dcLibBooted = false;
+//: La última dirección que escribió la biblioteca. Si al dibujar la dirección es OTRA y nadie ha
+//: pulsado el menú, es que se ha vuelto atrás (o se ha pegado un enlace): entonces manda ella.
+let _dcLibLastUrl = '';
+//: Abrir el cuadro de importar en cuanto se pinte: un `?ctab=import` de antes.
+let _dcLibImportWanted = false;
+//: Lo último pintado en el cuadro de importar, para no reescribirlo igual: reescribirlo vacía
+//: el fichero elegido en «Subir un zip», que no está en el marcado.
+let _dcLibImportLast = '';
+
+/** La vista (de la dirección) que corresponde a un nombre de pestaña. */
+function _dcLibSlug(tab) {
+    return Object.keys(_DCLIB_TAB).find(k => _DCLIB_TAB[k] === tab) || 'summary';
+}
+
+/** La pestaña que se pinta: la pedida, si este lector puede verla. */
+function _dcLibTabNow() {
+    const tab = _dcCatTab;
+    if (tab === 'schemas' && !_dcimMay('dcim_catalog_manage')) return 'summary';
+    return Object.values(_DCLIB_TAB).includes(tab) ? tab : 'summary';
+}
+
+/** La dirección de una vista, con la consulta de lo que esa vista tiene puesto. */
+function _dcLibUrl(slug) {
+    const base = (typeof _sbPageUrl === 'function' && _sbPageUrl('models')) || '/catalog/library';
+    const q = _dcCatUrlQuery(_DCLIB_TAB[slug] || 'summary');
+    return `${base}/${slug}${q ? '?' + q : ''}`;
+}
+
+/** Las direcciones de antes, a la de ahora — una vez, al llegar.
+ *
+ *  `/admin?tab=models&ctab=brands&bview=usage` y `/dcim/catalog?ctab=platforms` son marcadores
+ *  y enlaces que existen. Se traducen a su vista conservando el resto de la consulta, que sigue
+ *  significando lo mismo. Sin `ctab` pero con un filtro de modelos (`?tree=…`), a los Modelos:
+ *  era la pestaña de entrada. Sin nada, a la que toque (la última usada o el Resumen). */
+function _dcLibMigrate() {
+    const base = (typeof _sbPageUrl === 'function' && _sbPageUrl('models')) || '/catalog/library';
+    const path = window.location.pathname || '';
+    let q;
+    try { q = new URLSearchParams(window.location.search || ''); } catch (e) { return; }
+    const antigua = q.get('ctab');
+    const aqui = path === base || path.startsWith(base + '/');
+    if (aqui && antigua === null) return;
+    let slug = antigua !== null ? (_DCLIB_OLD[antigua] || '') : '';
+    const deModelos = ['tree', 'kind', 'maker', 'q', 'cview', 'brand', 'source', 'img', 'ports',
+                       'unused', 'import'];
+    if (!slug && !aqui && deModelos.some(k => q.get(k) !== null)) slug = 'models';
+    if (antigua === 'import' && _dcimMay('dcim_catalog_manage')) _dcLibImportWanted = true;
+    q.delete('ctab');
+    q.delete('tab');
+    if (slug) {
+        try { localStorage.setItem('ss_active_view_models', slug); } catch (e) { /* ídem */ }
+    }
+    const vista = slug || (typeof _sbPageView === 'function' && _sbPageView('models'))
+        || 'summary';
+    const resto = q.toString();
+    history.replaceState({pane: 'tab-models'}, '', `${base}/${vista}${resto ? '?' + resto : ''}`);
+}
+
+/** La entrada de la sección: la llama el menú, el registro de secciones al abrir el panel, y
+ *  volver atrás entre dos vistas. Decide QUÉ vista y con qué filtros; pintar es `renderDcim`. */
+function renderDcLibrary() {
+    const pulsado = !!(window._ssNavPicked && window._ssNavPicked.pageId === 'models');
+    if (pulsado) window._ssNavPicked = null;
+    if (!_dcLibBooted) {
+        _dcLibBooted = true;
+        _dcLibMigrate();
+        _dcCatUrlLoad(true);
+    } else if (!pulsado && _dcLibLastUrl
+               && (window.location.pathname + window.location.search) !== _dcLibLastUrl) {
+        // Atrás o adelante: la dirección es lo que se ha pedido, con SUS filtros. Lo que no diga
+        // vuelve a su valor de siempre — si no, el filtro de la vista de la que se vuelve se
+        // quedaría puesto en la vista a la que se vuelve.
+        _dcCatFiltersReset();
+        _dcCatView = 'list';
+        _dcCatSort = '';
+        _dcCatDir = 'asc';
+        _dcBrandView = 'table';
+        _dcPlatEos = '';
+        _dcCatUrlLoad(true);
+    }
+    const slug = (typeof _sbPageView === 'function' && _sbPageView('models')) || 'summary';
+    _dcCatTab = _DCLIB_TAB[slug] || 'summary';
+    // Entering the Summary asks for it again: it counts what the other views change, and one
+    // read a quarter of an hour ago says what was true then.
+    if (_dcCatTab === 'summary') _dcLibSum = null;
+    try { localStorage.setItem('ss_active_view_models', slug); } catch (e) { /* ídem */ }
+    if (typeof _sbHighlightSub === 'function') _sbHighlightSub('#view-models-' + slug);
+    // Los modelos se piden cada vez: los filtros van al servidor. Las demás vistas pintan con
+    // lo que ya hay, y piden lo suyo al dibujarse si no lo tienen.
+    if (!_dcCat || _dcCatTab === 'list') return _dcCatOpen();
+    _dcCatUrlSave();
+    renderDcim();
+}
+
+/** Ir a otra vista de la biblioteca SIN recargar, con una entrada en el historial.
+ *
+ *  Quien llama ya ha dejado puestos los filtros que quiere (el Resumen, una ficha, el buscador
+ *  de la cabecera), así que la dirección se compone aquí con ellos y no se lee: leerla sería
+ *  perderlos. Desde fuera de la biblioteca se entra por la puerta del menú. */
+function _dcLibGo(slug) {
+    if (!_DCLIB_TAB[slug]) slug = 'summary';
+    _dcCatTab = _DCLIB_TAB[slug];
+    if (_dcLibTabNow() !== _dcCatTab) {
+        slug = 'summary';
+        _dcCatTab = 'summary';
+    }
+    try { localStorage.setItem('ss_active_view_models', slug); } catch (e) { /* ídem */ }
+    const panel = document.getElementById('tab-models');
+    if (!panel || !panel.classList.contains('active')) {
+        if (typeof _navPageView === 'function') return _navPageView('models', slug);
+        return undefined;
+    }
+    const url = _dcLibUrl(slug);
+    if ((window.location.pathname + window.location.search) !== url)
+        history.pushState({pane: 'tab-models'}, '', url);
+    _dcLibLastUrl = url;
+    if (typeof _sbHighlightSub === 'function') _sbHighlightSub('#view-models-' + slug);
+    if (_dcCatTab === 'list' || !_dcCat) return _dcCatOpen();
+    renderDcim();
+    return undefined;
+}
+
+/** Pintar la biblioteca en su panel, y lo que cuelga de ella: la tabla de marcas (que se llena
+ *  sola en su hueco), el cuadro de importar si está abierto, y las cuentas del menú. */
+function _dcLibDraw(pane) {
+    // Lo que se estaba escribiendo sigue escribiéndose: el buscador de modelos busca al dejar
+    // de teclear, y la respuesta redibuja el panel entero con la caja dentro.
+    const foco = _dcLibFocusKeep();
+    pane.innerHTML = _dcCatHtml();
+    _dcLibFocusBack(foco);
+    if (typeof _dcBrandsMount === 'function') _dcBrandsMount();
+    // The models' table fills its hole after an await (its `prepare`), so the search box it
+    // holds exists only then: the focus goes back to it once it is drawn.
+    const tabla = typeof _dcCatMount === 'function' ? _dcCatMount() : null;
+    if (tabla && typeof tabla.then === 'function') tabla.then(() => _dcLibFocusBack(foco));
+    _dcLibImportRedraw();
+    if (_dcLibImportWanted) {
+        _dcLibImportWanted = false;
+        _dcLibImportOpen();
+    }
+    _dcLibCounts();
+}
+
+/** Qué caja de texto tiene el foco y dónde está el cursor, para devolvérselo tras redibujar. */
+function _dcLibFocusKeep() {
+    const el = document.activeElement;
+    if (!el || !el.id || !/^(INPUT|TEXTAREA)$/.test(el.tagName || '')) return null;
+    let a = null, b = null;
+    try { a = el.selectionStart; b = el.selectionEnd; } catch (e) { /* sin cursor */ }
+    return {id: el.id, a, b};
+}
+
+function _dcLibFocusBack(f) {
+    if (!f) return;
+    const el = document.getElementById(f.id);
+    if (!el || typeof el.focus !== 'function' || el === document.activeElement) return;
+    el.focus();
+    try { if (f.a !== null) el.setSelectionRange(f.a, f.b); } catch (e) { /* ídem */ }
+}
+
+/** Las cuentas de cada vista, al lado de su nombre en el menú. */
+function _dcLibCounts() {
+    if (typeof _sbSetViewCounts !== 'function') return;
+    const c = (_dcCat || {}).counts || {};
+    const n = (x) => ((x === undefined || x === null) ? '' : String(x));
+    _sbSetViewCounts('models', {brands: n(c.brands), models: n(c.models),
+                                platforms: n(c.platforms), connectors: n(c.connectors),
+                                schemas: n(c.schemas)});
+}
+
+// ── La cabecera: qué vista, el buscador de modelos y la importación en curso ──────────────
+
+function _dcLibHeadHtml(tab) {
+    const d = _dcCat || {};
+    const puede = _dcimMay('dcim_catalog_manage');
+    const nota = tab === 'summary' ? t('dcim_lib_summary_intro')
+               : tab === 'list' ? tf('dcim_cat_note', d.total || 0) : '';
+    return `<div class="ss-toolrow mb-3">
+        <span class="fw-semibold ss-fs-5">${esc(t(_DCLIB_LABEL[tab] || 'tab_models'))}</span>
+        <span class="text-muted ss-fs-2 ss-toolrow-text">${esc(nota)}</span>
+        <div class="ss-toolrow-tools ss-wrap">
+            ${_dcLibPillHtml()}
+            <input id="dclib-q" type="search" class="form-control form-control-sm"
+                   style="width:15rem" placeholder="${escAttr(t('dcim_lib_search_ph'))}"
+                   aria-label="${escAttr(t('dcim_lib_search_ph'))}"
+                   onkeydown="if(event.key==='Enter')_dcLibSearch(this.value)">
+            ${puede && tab === 'summary' ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcCatEdit(null)"><i class="bi bi-plus-lg me-1"></i>${
+                esc(t('dcim_cat_new'))}</button>` : ''}
+            ${puede && tab !== 'brands' ? `<button class="btn btn-sm btn-primary" onclick="_dcLibImportOpen()">
+                <i class="bi bi-download me-1"></i>${esc(t('dcim_lib_import_btn'))}</button>`
+                : ''}
+        </div>
+    </div>`;
+}
+
+/** Buscar un modelo desde cualquier vista: a los Modelos, con eso escrito y nada más puesto. */
+function _dcLibSearch(q) {
+    const v = String(q || '').trim();
+    if (!v) return;
+    _dcCatFiltersReset();
+    _dcCatQ = v;
+    _dcCatView = 'list';
+    _dcLibGo('models');
+}
+
+/** La píldora de la importación en curso: lo que va, y un clic para volver a su cuadro. */
+function _dcLibPillHtml() {
+    const j = (_dcCat || {}).job;
+    if (!j || j.done) return '';
+    const total = Number(j.total || 0);
+    const hecho = Number(j.fetched || j.count || 0);
+    const pct = total > 0 ? Math.min(100, Math.round(hecho * 100 / total)) : 0;
+    return `<button class="btn btn-sm btn-secondary d-inline-flex align-items-center gap-2"
+            onclick="_dcLibImportOpen()" title="${escAttr(t('dcim_lib_job_tt'))}">
+        <span class="spinner-border spinner-border-sm"></span>${esc(t('dcim_lib_job'))}${
+        total > 0 ? ` <span class="ss-tabular">${pct}%</span>` : ''}</button>`;
+}
+
+// ── Importar: un cuadro, no una vista ───────────────────────────────────────────────────
+
+/** Abrir el cuadro de importar. Con una importación en marcha enseña cómo va; sin ella, las
+ *  tres puertas y «Traer los básicos». */
+function _dcLibImportOpen() {
+    if (!_dcimMay('dcim_catalog_manage')) return;
+    _dcCatAskImport = '';
+    _dcLibImportLast = _dcCatImportHtml((_dcCat || {}).job);
+    showHtmlModal(t('dcim_lib_import_title'), `<div id="dclib-import">${_dcLibImportLast}</div>`,
+                  'primary', '', 'wide');
+}
+
+/** Si el cuadro de importar es el que está a la vista. Se mira el diálogo y no solo el hueco:
+ *  cerrado, su contenido sigue en el documento hasta que se abra otro. */
+function _dcLibImportShown() {
+    const m = document.getElementById('infoModal');
+    return !!(document.getElementById('dclib-import') && m && m.classList.contains('show'));
+}
+
+/** Rehacer el cuadro con lo que hay ahora —otra puerta, los fabricantes leídos, el progreso—,
+ *  solo si ha cambiado: rehacerlo igual vaciaría el fichero elegido para subir. */
+function _dcLibImportRedraw() {
+    if (!_dcLibImportShown()) return;
+    const body = _dcCatImportHtml((_dcCat || {}).job);
+    if (body === _dcLibImportLast) return;
+    _dcLibImportLast = body;
+    const foco = _dcLibFocusKeep();
+    document.getElementById('dclib-import').innerHTML = body;
+    _dcLibFocusBack(foco);
+}
+
+function _dcLibImportClose() {
+    if (_dcLibImportShown()) hideInfoModal();
+}
+
+/** Cada vuelta del vigilante de la importación: la biblioteca, si está a la vista; si no, solo
+ *  el cuadro, que puede estar abierto encima de otra sección. */
+function _dcLibJobTick() {
+    if (_dcimApartPane() === 'models') return renderDcim();
+    _dcLibImportRedraw();
+    return undefined;
+}
+
+/** Terminó. El aviso ya lo dio el vigilante, esté quien esté donde esté; aquí se cierra el
+ *  cuadro y se olvida lo que la importación ha dejado viejo. */
+function _dcLibJobDone() {
+    _dcLibImportClose();
+    _dcLibSum = null;
+    if (_dcimApartPane() === 'models') return _dcCatFresh();
+    _dcCat = null;
+    _dcBrands = null;
+    _dcPlats = null;
+    return undefined;
+}

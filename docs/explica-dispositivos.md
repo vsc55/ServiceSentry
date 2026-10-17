@@ -96,6 +96,20 @@ flowchart LR
 - Los campos que aporta el dispositivo (los de `__device_profile__`) se **ocultan** en el formulario del
   check cuando está ligado a un dispositivo (no se re-piden).
 
+### Checks simulados (`simulated`)
+
+Un check puede llevar, en vez de un destino al que llegar, un **escenario** —el campo
+`simulated: {source, results: [{suffix, status, message, metrics, data}]}`—. Su watchful **no lo
+ve**: `ModuleBase.get_conf(<colección>)` lo deja fuera, en el mismo sitio donde se aplica el
+alcance de «recoger este dispositivo», así que nada abre un socket ni lanza un comando por él. Lo
+contesta el monitor (`Monitor.check_module` → `simulated.merge_into`) en cada ciclo, y desde ahí
+es un resultado como otro: la misma detección de cambios, la misma fila de `check_state`, la misma
+muestra de histórico y el mismo aviso —que el notificador no deja salir a ningún canal—. Cada
+métrica es `[base, margen, decimales]`: una lectura dentro del margen, igual para todos durante
+cinco minutos, para que una gráfica de días sea una línea creíble y dos pantallas vean el mismo
+número. Lo usa la vigilancia de la demo (`lib/core/dcim/demo_monitor.py`), que marca sus checks
+con `source: demo` para encontrarlos al borrarla.
+
 ---
 
 ## Ejecución consciente del dispositivo (local vs SSH)

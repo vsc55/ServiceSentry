@@ -37,7 +37,13 @@ CAMPOS = ('uid', 'label', 'u_start', 'u_height', 'face', 'role', 'serial', 'asse
 _LATER = ('placement', 'side_pos', 'side_slot')
 
 #: Y del armario. Su nombre y su altura son lo que cambia de sitio a las demás cosas.
-CAMPOS_RACK = ('name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid')
+CAMPOS_RACK = ('name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid',
+               'type_uid')
+
+#: Lo del armario que se empezó a guardar más tarde: su modelo del catálogo. Una foto anterior
+#: no lo lleva, y se lee como «ninguno» —lo que era: la columna nació vacía—, así que ni sale
+#: como un cambio ni impide que el primero de verdad se guarde.
+_LATER_RACK = ('type_uid',)
 
 #: Cómo se llama esto en `dc_rev`.
 SCOPE = 'rack'
@@ -107,6 +113,9 @@ def compare(antes: dict, ahora: dict) -> list[dict]:
     fuera: list[dict] = []
     for campo in CAMPOS_RACK:
         viejo, nuevo = (antes or {}).get(campo), (ahora or {}).get(campo)
+        if campo in _LATER_RACK:
+            # Sin la clave es «ninguno», que es lo que era: la columna nació vacía.
+            viejo, nuevo = viejo or '', nuevo or ''
         if viejo != nuevo:
             fuera.append({'kind': 'rack', 'uid': '', 'label': '', 'field': campo,
                           'from': viejo, 'to': nuevo})

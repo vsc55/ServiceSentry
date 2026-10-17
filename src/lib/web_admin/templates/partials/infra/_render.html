@@ -17,6 +17,7 @@
 
 let _infraDevices   = [];          // the fleet, worst first (the server orders it)
 let _infraSummary = {};          // counts by state, for the header
+let _infraSites   = [];          // the inventory's sites the fleet is in, for the filter
 let _infraDevice    = '';          // the machine that is open, '' = the fleet
 let _infraDetail  = null;        // its payload, kept so a redraw does not refetch
 let _infraTimer   = null;        // auto-refresh {_id, _interval}
@@ -51,6 +52,7 @@ async function renderInfra() {
     if (data) {
         _infraDevices   = data.devices || [];
         _infraSummary = data.summary || {};
+        _infraSites   = data.sites || [];
     }
     // A reload lands here with no device open; the URL is what remembers which one it was.
     // Only on the FIRST render — after that `_infraDevice` is the answer, and re-reading the

@@ -1,0 +1,240 @@
+{# ================================================================
+   DCIM — la biblioteca: la ficha a un lado, de una marca y de un modelo.
+
+   Pulsar una marca llevaba a sus modelos, y pulsar un modelo abría un diálogo con nueve
+   pestañas. Las dos cosas sacaban de la lista para contestar lo que se viene a preguntar: por
+   dónde se pide soporte de esta marca y con qué cuenta, y qué es este modelo — su foto, su altura,
+   sus puertos, cuántos hay puestos. La ficha lo dice a un lado, con la lista todavía a la vista,
+   y desde ella se sigue: a los modelos de la marca (o de una de sus formas), a sus plataformas,
+   o a la ficha completa del modelo, que sigue existiendo para todo lo demás.
+   ================================================================ #}
+
+//: Qué ficha está abierta: `{kind: 'brand'|'model', uid}`, o `null`.
+let _dcLibDrawer = null;
+
+// ── La de una marca ─────────────────────────────────────────────────────────────────────
+
+/** Abrir la ficha de una marca. Sus plataformas se piden si todavía no están, y la ficha se
+ *  rehace al llegar — si sigue siendo la de esa marca. */
+async function _dcLibBrandDrawer(uid) {
+    if (_dcBrands === null) {
+        const bs = await apiGet('/api/v1/dcim/brands') || {};
+        _dcBrands = {rows: bs.brands || []};
+    }
+    const b = ((_dcBrands || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (!b) return;
+    _dcLibDrawer = {kind: 'brand', uid: String(uid)};
+    const puede = _dcimMay('dcim_catalog_manage');
+    showDrawer(b.name || '', _dcLibBrandHtml(b),
+               puede ? `<button class="btn btn-secondary" onclick="_dcLibBrandEdit(${
+                   jsStr(String(uid))})"><i class="bi bi-pencil me-1"></i>${
+                   esc(t('edit'))}</button>` : '');
+    if (_dcPlats === null) {
+        const d = await apiGet('/api/v1/dcim/platforms') || {};
+        _dcPlats = {rows: d.platforms || [], kinds: d.kinds || [], lifecycle: d.lifecycle || []};
+        if (_dcLibDrawer && _dcLibDrawer.kind === 'brand' && _dcLibDrawer.uid === String(uid)) {
+            const body = document.getElementById('ssDrawerBody');
+            if (body) body.innerHTML = _dcLibBrandHtml(b);
+        }
+    }
+}
+
+/** Lo que se dice de una marca. Lo que no está escrito se dice que falta, en vez de dejar un
+ *  hueco: «sin cuenta registrada» es un dato, y un renglón vacío parece un fallo. */
+function _dcLibBrandHtml(b) {
+    const enlace = (url) => url
+        ? `<a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`
+        : `<span class="text-muted">—</span>`;
+    const formas = b.trees || {};
+    const arboles = _DCBRAND_TREES.filter(a => formas[a]);
+    const uso = b.in_use || null;
+    const [hoy, pronto] = _dcPlatEosDays();
+    const plats = ((_dcPlats || {}).rows || []).filter(p => String(p.brand_uid || '') ===
+                                                           String(b.uid));
+    return `${b.description ? `<p class="text-muted ss-fs-2">${esc(b.description)}</p>` : ''}
+        <div class="mb-3">
+            <div class="ss-drawer-h">${esc(t('dcim_lib_support_how'))}</div>
+            <dl class="ss-kv ss-fs-2">
+                <dt>${esc(t('dcim_brand_url'))}</dt><dd>${enlace(b.url)}</dd>
+                <dt>${esc(t('dcim_brand_support'))}</dt><dd>${enlace(b.support_url)}</dd>
+                <dt>${esc(t('dcim_brand_account'))}</dt><dd>${b.account
+                    ? `<span class="ss-tabular">${esc(b.account)}</span>
+                       <button class="btn btn-sm btn-secondary py-0 ms-1"
+                               onclick="_dcLibCopy(${jsStr(String(b.account))})">
+                           <i class="bi bi-clipboard me-1"></i>${esc(t('dcim_lib_copy'))}</button>`
+                    : `<span class="text-muted">${esc(t('dcim_lib_no_account'))}</span>`}</dd>
+            </dl>
+        </div>
+        <div class="mb-3">
+            <div class="ss-drawer-h">${esc(t('dcim_lib_models_by_shape'))}</div>
+            <div class="d-flex flex-wrap gap-1">${arboles.length ? arboles.map(a => `<button
+                    class="btn btn-sm btn-secondary"
+                    onclick="_dcLibBrandModels(${jsStr(String(b.uid))},${jsStr(a)})">
+                    <i class="bi ${escAttr(_DC_TREE_ICON[a] || 'bi-box')} me-1"></i>${
+                    esc(_dcCatTreeName(a))} <span class="ss-tabular">${
+                    esc(String(formas[a]))}</span></button>`).join('')
+                : `<span class="text-muted ss-fs-2">${esc(t('dcim_lib_no_hw'))}</span>`}
+                ${uso && Number(uso.items || 0) ? `<span class="badge text-bg-success
+                    align-self-center">${esc(tf('dcim_lib_placed_n', uso.items))}</span>` : ''}
+            </div>
+        </div>
+        ${plats.length ? `<div class="mb-3">
+            <div class="ss-drawer-h">${esc(t('dcim_cat_tab_platforms'))}</div>
+            <ul class="list-unstyled mb-1 ss-fs-2">${plats.map(p => `<li
+                class="d-flex justify-content-between gap-2 py-1 border-bottom">
+                <span>${esc(p.name || '')}</span>${_dcLibEosBadge(p, hoy, pronto)}</li>`).join('')}
+            </ul>
+            <button class="btn btn-sm btn-secondary"
+                    onclick="_dcLibBrandPlats(${jsStr(String(b.uid))})">
+                <i class="bi bi-disc me-1"></i>${esc(t('dcim_lib_see_plats'))}</button>
+        </div>` : ''}
+        ${Number(b.models || 0) ? `<button class="btn btn-sm btn-primary"
+                onclick="_dcLibBrandModels(${jsStr(String(b.uid))},'')">
+            ${esc(tf('dcim_lib_see_models', b.models))}<i class="bi bi-arrow-right ms-1"></i>
+            </button>` : ''}`;
+}
+
+/** El fin de soporte de una plataforma, con su color: rojo si ya pasó, ámbar si pasa pronto. */
+function _dcLibEosBadge(p, hoy, pronto) {
+    const fin = String(((p || {}).extra || {}).eol || '').slice(0, 10);
+    const estado = _dcPlatEosOf(p, hoy, pronto);
+    if (estado === 'none') return `<span class="text-muted">${esc(t('dcim_lib_no_date'))}</span>`;
+    const cls = estado === 'gone' ? 'bg-danger-subtle text-danger-emphasis'
+              : estado === 'soon' ? 'bg-warning-subtle text-warning-emphasis'
+                                  : 'bg-success-subtle text-success-emphasis';
+    const txt = estado === 'gone' ? tf('dcim_lib_eos_ended_on', fin) : fin;
+    return `<span class="badge fw-normal ${cls} ss-tabular">${esc(txt)}</span>`;
+}
+
+/** A los modelos de la marca —de una de sus formas, si se dice—, con nada más puesto. */
+function _dcLibBrandModels(uid, tree) {
+    const b = ((_dcBrands || {}).rows || []).find(x => String(x.uid) === String(uid)) || {};
+    hideDrawer();
+    _dcCatFiltersReset();
+    _dcCatBrand = String(uid || '');
+    _dcCatBrandName = b.name || '';
+    _dcCatTree = String(tree || '');
+    _dcCatView = 'list';
+    _dcLibGo('models');
+}
+
+/** A sus plataformas: la vista Plataformas, acotada a la marca por su uid. */
+function _dcLibBrandPlats(uid) {
+    const b = ((_dcBrands || {}).rows || []).find(x => String(x.uid) === String(uid)) || {};
+    hideDrawer();
+    _dcPlatBrand = String(uid || '');
+    _dcPlatBrandName = b.name || '';
+    _dcPlatQ = '';
+    _dcPlatEos = '';
+    _dcLibGo('platforms');
+}
+
+function _dcLibBrandEdit(uid) {
+    hideDrawer();
+    _dcBrandEdit(uid);
+}
+
+/** Copiar al portapapeles, diciendo si se pudo: sin permiso del navegador no hay forma de
+ *  copiar, y entonces lo que queda es seleccionar el número a mano. */
+async function _dcLibCopy(texto) {
+    try {
+        await navigator.clipboard.writeText(String(texto || ''));
+        showToast(t('dcim_lib_copied'), 'success');
+    } catch (e) {
+        showToast(t('dcim_lib_copy_failed'), 'warning');
+    }
+}
+
+// ── La de un modelo ─────────────────────────────────────────────────────────────────────
+
+/** Abrir la ficha de un modelo de la lista. La ficha completa —con su historial, sus imágenes
+ *  y sus adjuntos— está a un botón. */
+function _dcLibModelDrawer(uid, fila) {
+    // *fila* cuando se abre desde fuera de la biblioteca —el modelo de un armario, desde su
+    // cabecera—: la lista no tiene por qué estar cargada. Entonces solo se mira: editar, clonar,
+    // situar y quitar son de la biblioteca, que es la que sabe repintarse después.
+    const r = fila || ((_dcCat || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (!r) return;
+    _dcLibDrawer = {kind: 'model', uid: String(uid), row: fila || null};
+    const puede = _dcimMay('dcim_catalog_manage') && !fila;
+    const u = String(r.tree || 'device-types') === 'component-types'
+        ? (r.size || '') : (Number(r.u_tenths || 0) ? `${Number(r.u_tenths) / 10} U` : '');
+    const marca = r.brand_uid
+        ? `<a href="#" onclick="_dcLibBrandDrawer(${jsStr(String(r.brand_uid))});return false;">${
+              esc(r.manufacturer || '')}</a>`
+        : `${esc(r.manufacturer || '')} <span class="badge text-bg-warning fw-normal">${
+              esc(t('dcim_lib_no_sheet'))}</span>`;
+    const dato = (k, v) => (v === '' || v === null || v === undefined) ? ''
+        : `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+    const colocados = r.placed === undefined ? '' : esc(String(r.placed || 0))
+        + (Number(r.in_builds || 0) ? ' · ' + esc(tf('dcim_lib_in_builds', r.in_builds)) : '');
+    // Both faces, each named, as the full sheet and the port editor show them: the rear is
+    // where the power inlets and half the ports are, and a drawer with only the front hid it.
+    // A face without a photo says so in its place; with neither, one line says it for both.
+    const caras = [['dcim_cat_front', r.front_image], ['dcim_cat_rear', r.rear_image]];
+    const fotos = caras.some(([, img]) => img)
+        ? caras.map(([k, img]) => `<div class="mb-2"><div class="ss-drawer-h">${esc(t(k))}</div>${img
+              ? `<img src="${_dcimMediaUrl(img)}" alt="${escAttr(t(k))}"
+                      class="img-fluid border rounded ss-drawer-img">`
+              : `<div class="ss-drawer-noimg">${esc(t('dcim_pm_no_image'))}</div>`}</div>`).join('')
+        : `<div class="ss-drawer-noimg mb-3">${esc(t('dcim_lib_q_no_image'))}</div>`;
+    // Place its ports from here too, as from its row: disabled where there is nothing to place.
+    const situar = Number(r.ports_total || 0) + Number(r.bays_total || 0) > 0;
+    const html = `${fotos}
+        ${r.description ? `<p class="text-muted ss-fs-2 ss-prewrap">${esc(r.description)}</p>` : ''}
+        <dl class="ss-kv ss-fs-2">
+            ${dato(t('dcim_cat_maker'), marca)}
+            ${dato(t('dcim_cat_kind'), esc(_dcCatTreeName(r.tree)))}
+            ${dato(t('dcim_role'), _dcCatKindIcon(r.kind) + esc(_dcCatKindName(r.kind)))}
+            ${dato(String(r.tree || '') === 'component-types' ? t('dcim_part_size')
+                   : t('dcim_lib_height'), esc(u || '—'))}
+            ${dato(t('dcim_cat_ports'), esc(_dcCatPorts(r) || '—'))}
+            ${dato(t('dcim_cat_part_number'), r.part_number ? esc(r.part_number) : '')}
+            ${dato(t('dcim_lib_col_source'), esc(_dcCatSrcName(r.source)
+                + (r.imported_at ? ' · ' + _dcLibDay(r.imported_at) : '')))}
+            ${dato(t('dcim_lib_col_placed'), colocados)}
+        </dl>`;
+    showDrawer(`${r.manufacturer || ''} ${r.model || ''}`.trim(), html,
+               `<button class="btn btn-primary text-nowrap"
+                        onclick="_dcLibModelFull(${jsStr(String(uid))})">
+                   <i class="bi bi-card-text me-1"></i>${esc(t('dcim_lib_full_sheet'))}</button>${
+               puede ? `<button class="btn btn-secondary" title="${escAttr(t('edit'))}"
+                   aria-label="${escAttr(t('edit'))}"
+                   onclick="_dcLibModelEdit(${jsStr(String(uid))},false)">
+                   <i class="bi bi-pencil"></i></button>
+                <button class="btn btn-secondary" title="${escAttr(t('dcim_cat_clone'))}"
+                   aria-label="${escAttr(t('dcim_cat_clone'))}"
+                   onclick="_dcLibModelEdit(${jsStr(String(uid))},true)">
+                   <i class="bi bi-files"></i></button>
+                <button class="btn btn-secondary"${situar
+                   ? ` title="${escAttr(t('dcim_pm_open'))}" aria-label="${escAttr(t('dcim_pm_open'))}"
+                       onclick="hideDrawer();_dcPmOpen(${jsStr(String(uid))})"`
+                   : ` disabled title="${escAttr(t('dcim_pm_no_ports'))}"
+                       aria-label="${escAttr(t('dcim_pm_no_ports'))}"`}>
+                   <i class="bi bi-geo"></i></button>
+                <button class="btn btn-danger" title="${escAttr(t('delete'))}"
+                   aria-label="${escAttr(t('delete'))}"
+                   onclick="_dcLibModelDrop(${jsStr(String(uid))})">
+                   <i class="bi bi-trash"></i></button>` : ''}`);
+}
+
+/** Remove this model from its drawer — its row's delete button does the same, and several go
+ *  from the selection band; it asks first, in the panel's own modal. */
+function _dcLibModelDrop(uid) {
+    const r = ((_dcCat || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (!r || !_dcimMay('dcim_catalog_manage')) return;
+    hideDrawer();
+    _dcCatDrop(String(uid), `${r.manufacturer || ''} ${r.model || ''}`.trim());
+}
+
+/** La ficha completa, la de siempre: con el cajón cerrado, que no se queden los dos. */
+function _dcLibModelFull(uid) {
+    const fila = (_dcLibDrawer && _dcLibDrawer.uid === String(uid)) ? _dcLibDrawer.row : null;
+    hideDrawer();
+    _dcCatShow(uid, fila || undefined, !!fila);
+}
+
+function _dcLibModelEdit(uid, clonar) {
+    hideDrawer();
+    _dcCatRowEdit(uid, clonar);
+}

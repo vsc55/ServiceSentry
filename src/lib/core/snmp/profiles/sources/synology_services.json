@@ -1,13 +1,7 @@
 {
     "id": "synology_services",
-    "label": {
-        "en_EN": "Synology — service users (SYNOLOGY-SERVICES-MIB)",
-        "es_ES": "Synology — usuarios por servicio (SYNOLOGY-SERVICES-MIB)"
-    },
-    "description": {
-        "en_EN": "Connected users per service (SMB, AFP, FTP, NFS…), one row per service as the DiskStation names it. It is what turns \"the NAS is slow\" into \"forty people are on SMB\".",
-        "es_ES": "Usuarios conectados por servicio (SMB, AFP, FTP, NFS…), una fila por servicio con el nombre que le da el DiskStation. Es lo que convierte «el NAS va lento» en «hay cuarenta personas en SMB»."
-    },
+    "label": {"i18n": "synology_services/label"},
+    "description": {"i18n": "synology_services/desc"},
     "match": {
         "sysobjectid_prefix": "1.3.6.1.4.1.6574",
         "probe": "1.3.6.1.4.1.6574.6.1.1.1.0"
@@ -15,7 +9,7 @@
     "metrics": [
         {
             "key": "syno_service_users",
-            "label": {"en_EN": "Connected users", "es_ES": "Usuarios conectados"},
+            "label": {"i18n": "synology_services/syno_service_users"},
             "walk": "1.3.6.1.4.1.6574.6.1.1.3",
             "kind": "gauge",
             "unit": "users",

@@ -89,6 +89,7 @@ function _dcRackHeader(rack, items, free) {
                 ${_dcimOrgBadge(rack.org_uid)}
                 <span class="text-body-secondary ss-fs-2">${
                     esc(tf('dcim_rack_note', Number(rack.u_height || 0), items.length))}</span>
+                ${_dcRackModelBadge(rack)}
             </span>
         </div>
         ${_dcimRollBadge(_dcimRack.roll)}
@@ -117,6 +118,32 @@ function _dcRackHeader(rack, items, free) {
         </div>
         ${_dcRackNarrow() ? '' : `<div class="ss-toolrow-tools">${_dcRackViewPicker()}</div>`}
     </div>`;
+}
+
+/** De qué modelo del catálogo es el armario, en su cabecera: el nombre, y quien puede leer el
+ *  catálogo lo abre con un clic —la ficha lateral del modelo, la misma de la biblioteca—. Nada si
+ *  no dice ninguno: un hueco que dijera «sin modelo» en cada armario de antes sería ruido. */
+function _dcRackModelBadge(rack) {
+    const uid = String((rack || {}).type_uid || '');
+    if (!uid) return '';
+    const nombre = String(rack.type_name || '') || t('dcim_cat_model');
+    const dentro = `<i class="bi bi-building me-1"></i>${esc(nombre)}`;
+    if (!_dcimMay('dcim_catalog_view'))
+        return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            title="${escAttr(t('dcim_cat_model'))}">${dentro}</span>`;
+    return `<a href="#" class="badge bg-body-secondary text-body-secondary border fw-normal
+        text-decoration-none" data-dc-rack-model="${escAttr(uid)}"
+        title="${escAttr(t('dcim_rack_model_open'))}" aria-label="${escAttr(t('dcim_rack_model_open'))}"
+        onclick="_dcRackModelOpen(${jsStr(uid)});return false;">${dentro}</a>`;
+}
+
+/** Abrir la ficha del modelo de un armario desde donde se esté: se pide ESE modelo por su uid
+ *  —la biblioteca no tiene por qué estar cargada— y se enseña en el cajón, solo para mirar. */
+async function _dcRackModelOpen(uid) {
+    const d = await apiGet(`/api/v1/dcim/catalog?tree=rack-types&uid=${encodeURIComponent(uid)}`);
+    const fila = ((d || {}).types || []).find(r => String(r.uid) === String(uid));
+    if (!fila) return showToast(t('dcim_not_found'), 'warning');
+    _dcLibModelDrawer(uid, fila);
 }
 
 function _dcimRackHtml() {

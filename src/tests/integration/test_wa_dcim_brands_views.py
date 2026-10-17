@@ -164,8 +164,21 @@ let puede = true;
 _dcimMay = (p) => p === 'dcim_catalog_manage' && puede;
 // The address, for the view that travels in it.
 let __url = '';
-window.history = {replaceState: (s, tt, u) => { __url = String(u); }, pushState() {}};
-window.location.href = 'http://x/admin?tab=models';
+// The browser's address, kept as a browser keeps it: the library reads its view from the path
+// and writes each view's state into the query.
+function __go(u) {
+    __url = String(u);
+    const x = new URL(String(u), 'http://x');
+    window.location.pathname = x.pathname;
+    window.location.search = x.search;
+}
+window.history = {replaceState: (s, tt, u) => __go(u), pushState: (s, tt, u) => __go(u)};
+window.location.href = 'http://x/catalog/library/brands';
+window.location.pathname = '/catalog/library/brands';
+// The sidebar's highlight walks the real menu, which the harness has not got.
+_sbHighlightSub = () => {};
+// A library already open: what is checked is moving inside it, not arriving.
+_dcLibBooted = true;
 let pedido = '';
 apiGet = async (u) => { pedido = u; return {brands: ROWS, usage: true}; };
 renderDcim = () => {};
@@ -189,12 +202,34 @@ const go = (uid) => `_dcBrandGo(${jsStr(uid)}`;
 _dcCatTab = 'brands';
 _dcBrands = {rows: ROWS, usage: true, asked: true};
 
-// 1. The switcher, on the table view (the default).
+// 1. The switcher, on the table view (the default): in the card's header, as Users has it —
+// the panel's own switcher, and «Import…» beside it for who manages; the pane is only the hole.
 _dcBrandView = 'table';
-const t0 = _dcBrandsHtml();
+const t0 = _dcBrandLeadHtml({puede: true});
+const hueco = _dcBrandsHtml();
 __o.sw = {n: (t0.match(/_dcBrandGoView\(/g) || []).length,
           tableOn: /btn btn-primary"\s*onclick="_dcBrandGoView\(&quot;table&quot;\)"/.test(t0),
-          hole: t0.includes('id="dcbrd-container"')};
+          hole: hueco.includes('id="dcbrd-container"'),
+          onlyHole: !hueco.includes('_dcBrandGoView(')};
+__o.lead = {imp: t0.includes('_dcLibImportOpen()'),
+            readerNoImp: !_dcBrandLeadHtml({puede: false}).includes('_dcLibImportOpen()'),
+            readerSwitch: _dcBrandLeadHtml({puede: false}).includes('_dcBrandGoView('),
+            titleNoImp: !_dcLibHeadHtml('brands').includes('_dcLibImportOpen()')
+                        && _dcLibHeadHtml('list').includes('_dcLibImportOpen()')};
+// The page itself: like Users, the card edge to edge with nothing over it — no title row, no
+// padding around it; the other library views keep both.
+const __tabReal = _dcLibTabNow;
+let __pagina = 'brands';
+_dcLibTabNow = () => __pagina;
+const pb = _dcCatHtml();
+__pagina = 'summary';
+_dcLibSum = {models: {}, brands: {}, platforms: {}, connectors: {}, quality: {}};
+const ps = _dcCatHtml();
+__o.page = {bare: pb.startsWith('<div class="ss-vfill">') && !pb.includes('dclib-q')
+                  && !pb.includes('px-3 py-3'),
+            othersKeep: ps.includes('px-3 py-3') && ps.includes('dclib-q')};
+_dcLibTabNow = __tabReal;
+_dcLibSum = null;
 
 // 2. The view goes to the address, and comes back from it; the default stays out of it.
 _dcBrandGoView('trees');
@@ -207,32 +242,32 @@ _dcCatUrlLoad();
 __o.loaded = _dcBrandView;
 _dcBrandView = 'nonsense';
 __o.unknown = _dcBrandViewNow();
-const tu = _dcBrandsHtml();
-__o.unknownIsTable = tu.includes('id="dcbrd-container"');
+__o.unknownIsTable = /btn btn-primary"\s*onclick="_dcBrandGoView\(&quot;table&quot;\)"/
+    .test(_dcBrandLeadHtml({puede: true}));
 
 // 4. In use: only brands with items, most first; the counts; and the request.
 _dcBrandView = 'usage';
-const u1 = _dcBrandsHtml();
+const u1 = _dcBrandViewBody(ROWS);
 __o.usage = {order: [...u1.matchAll(/_dcBrandGo\(&quot;(b\d)&quot;/g)].map(m => m[1]),
              counts: u1.includes('>7</td>') && u1.includes('>3</td>')};
 _dcBrands = {rows: ROWS, usage: false, asked: true};
-__o.usageNoPerm = _dcBrandsHtml().includes(t('dcim_brand_use_noperm'));
+__o.usageNoPerm = _dcBrandViewBody(ROWS).includes(t('dcim_brand_use_noperm'));
 _dcBrands = {rows: ROWS, usage: false, asked: false};
 _dcBrandsBusy = false;
-_dcBrandsHtml();
+_dcBrandViewBody(ROWS);
 await Promise.resolve(); await Promise.resolve();
 __o.usageAsked = pedido;
 _dcBrands = {rows: ROWS, usage: true, asked: true};
 
 // 5. By model type: one group per brand with models, a line per tree; folding; a click.
 _dcBrandView = 'trees';
-const r1 = _dcBrandsHtml();
+const r1 = _dcBrandViewBody(ROWS);
 __o.trees = {fold: r1.includes('_dcBrandFold(&quot;b1&quot;)'),
              noEmpty: !r1.includes('_dcBrandFold(&quot;b3&quot;)'),
              lines: (r1.match(/_dcBrandGoTree\(/g) || []).length,
              comp: r1.includes(_dcCatTreeName('component-types'))};
 _dcBrandShut = new Set(['b1']);
-const r2 = _dcBrandsHtml();
+const r2 = _dcBrandViewBody(ROWS);
 __o.folded = (r2.match(/_dcBrandGoTree\(/g) || []).length;
 _dcBrandShut = new Set();
 let abierto = 0;
@@ -266,17 +301,18 @@ __o.platsSelAll = [..._dcPlatSel].sort();
 _dcPlatBrand = '';
 _dcCatTab = 'brands';
 
-// 7. The filter of these views, and its empty answer.
+// 7. The views draw the rows the table's filter bar left — the same bar filters all three —
+// and say so when it left none.
 _dcBrandView = 'trees';
-_dcBrandQ = 'BOREAL';
-const f1 = _dcBrandViewBody();
+const f1 = _dcBrandViewBody([ROWS[1]]);
 __o.filter = {only: f1.includes('_dcBrandFold(&quot;b2&quot;)')
                     && !f1.includes('_dcBrandFold(&quot;b1&quot;)')};
-_dcBrandQ = 'zzz';
-__o.filterNone = _dcBrandViewBody().includes(t('dcim_brand_q_none'));
-_dcBrandQ = '';
+__o.filterNone = _dcBrandViewBody([]).includes(t('dcim_brand_q_none'));
+_dcBrandView = 'usage';
+__o.filterUsage = (u => u.includes('_dcBrandGo(&quot;b2&quot;') && !u.includes('_dcBrandGo(&quot;b1&quot;'))(
+    _dcBrandViewBody([ROWS[1]]));
 
-// 8. The table is not drawn while another view is showing.
+// 8. The card is drawn in every view: the other two are bodies of the same card.
 let dibujada = 0;
 const _real = renderDcBrd;
 renderDcBrd = () => { dibujada++; };
@@ -315,7 +351,16 @@ def out():
 class TestTheSwitcher:
 
     def test_three_views_and_the_table_by_default(self, out):
-        assert out['sw'] == {'n': 3, 'tableOn': True, 'hole': True}
+        assert out['sw'] == {'n': 3, 'tableOn': True, 'hole': True, 'onlyHole': True}
+
+    def test_the_switcher_and_import_sit_in_the_cards_header(self, out):
+        """Beside the columns button, as Users has them: not a bar of their own over the card,
+        and «Import…» not up in the title row."""
+        assert out['lead'] == {'imp': True, 'readerNoImp': True, 'readerSwitch': True,
+                               'titleNoImp': True}
+
+    def test_the_page_is_the_card_edge_to_edge_as_users(self, out):
+        assert out['page'] == {'bare': True, 'othersKeep': True}
 
     def test_the_view_travels_in_the_address(self, out):
         assert 'bview=trees' in out['url']
@@ -325,8 +370,8 @@ class TestTheSwitcher:
     def test_an_unknown_view_is_the_table(self, out):
         assert out['unknown'] == 'table' and out['unknownIsTable']
 
-    def test_the_table_is_drawn_only_in_its_own_view(self, out):
-        assert out['mountOther'] == 0 and out['mountTable'] == 1
+    def test_the_card_is_drawn_in_every_view(self, out):
+        assert out['mountOther'] == 1 and out['mountTable'] == 2
 
 
 @_needs_node
@@ -372,4 +417,4 @@ class TestByModelType:
 class TestTheFilter:
 
     def test_narrows_the_views(self, out):
-        assert out['filter']['only'] and out['filterNone']
+        assert out['filter']['only'] and out['filterNone'] and out['filterUsage']

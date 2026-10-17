@@ -346,7 +346,7 @@ function _dcCableInfo(uid, editar) {
         ${fila(t('dcim_cable_color'), c.color
             ? `<span class="ss-dot" style="background:${escAttr(c.color)}"></span>
                <span class="text-muted ss-tabular ss-fs-2">${esc(c.color)}</span>` : '—')}
-        ${fila(t('dcim_description'), esc(c.description || '—'))}
+        ${fila(t('dcim_description'), `<span class="ss-prewrap">${esc(c.description || '—')}</span>`)}
         ${tirada ? '' : `${fila(t('dcim_cable_from'), punta('a', c.a_port))}
             ${fila(t('dcim_cable_to'), punta('b', c.b_port))}`}
         ${c.seen ? fila(t('dcim_cable_check'), `<span class="badge text-bg-${_dcSeenTone(c.seen)}

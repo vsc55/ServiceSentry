@@ -100,7 +100,21 @@ function _cfgSectionActions(sec, data) {
                 ${acts.map(a => _cfgActionButton(a, sec)).join('')}</div>
         </div></div>`;
     }
+    // A card that says how things are now (`status_fn`) is filled once it is on the page.
+    if (acts.some(a => a.status_fn)) setTimeout(_cfgActionStatusFill, 0);
     return `<div class="cfg-actions-wrap">${_cfgActionsAsCards(groups, sec)}</div>`;
+}
+
+/** Fill every action card's status line: the action names a global function that is handed
+ *  the line's element and writes what it says —«installed: version 2»—, from the server.
+ *  Generic, as the buttons are: the panel names no package here. */
+function _cfgActionStatusFill() {
+    document.querySelectorAll('.cfg-actcard-status[data-status-fn]').forEach(el => {
+        const fn = window[el.getAttribute('data-status-fn')];
+        if (typeof fn === 'function') {
+            try { fn(el); } catch (e) { el.textContent = ''; }
+        }
+    });
 }
 
 /** A card per action: icon + name, one line of what it does, and the verb on the button.
@@ -121,6 +135,8 @@ function _cfgActionsAsCards(groups, sec) {
                         <i class="bi ${escAttr(a.icon || 'bi-dot')} me-1"></i>${esc(t(a.label_key))}
                     </div>
                     ${a.desc_key ? `<div class="cfg-actcard-desc">${esc(t(a.desc_key))}</div>` : ''}
+                    ${a.status_fn ? `<div class="cfg-actcard-status" data-status-fn="${
+                        escAttr(a.status_fn)}"></div>` : ''}
                     <div class="mt-auto pt-2">
                         ${_cfgActionButton(a, sec, { cls: ' w-100', shortLabel: true })}</div>
                 </div>`).join('')}

@@ -80,7 +80,9 @@ CONFIG_ACTIONS = [
      'desc_key': 'dcim_demo_install_desc',
      'icon': 'bi-building-add', 'variant': 'primary', 'order': 40,
      'group_label_key': 'cfg_actions_group_demo', 'perm': 'db_maintenance',
-     'fn': '_dcimDemoInstall'},
+     # Which version is installed and whether this code brings a newer one, with the button
+     # that updates it when it does.
+     'fn': '_dcimDemoInstall', 'status_fn': '_dcimDemoStatus'},
     {'section': 'maintenance', 'id': 'dcim_demo_remove',
      'label_key': 'dcim_demo_remove', 'tooltip_key': 'dcim_demo_remove_tt',
      'desc_key': 'dcim_demo_remove_desc',

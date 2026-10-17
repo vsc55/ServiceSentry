@@ -397,23 +397,55 @@ def cmd_reload(ctx, args) -> int:
 
 # ── DCIM demo site ──────────────────────────────────────────────────────────────
 def cmd_dcim_demo(ctx, args) -> int:
-    """Build the demonstration site (``dcim demo``), or remove it (``--remove``).
+    """Build the demonstration site (``dcim demo``), remove it (``--remove``) or say which
+    version is installed and whether this code brings a newer one (``--status``). Each step is
+    printed as it starts.
 
     Refuses when the demo already exists unless ``--replace`` says to rebuild it. Only the
     sites named by :mod:`lib.core.dcim.demo` are ever touched. Returns 0 on success.
     """
     from lib.core.dcim import demo                      # noqa: PLC0415
+    from lib.core.dcim import demo_monitor              # noqa: PLC0415
     from lib.core.dcim.store import DcimStore           # noqa: PLC0415
     store = DcimStore(ctx.db)
     media_dir = str((ctx.cfg.get('web_admin') or {}).get('dcim_media_dir') or '')
+    # What the monitoring part of the demo needs of a panel —its stores, the module
+    # configuration, the directories a monitor is built from—, out of the database and the
+    # configuration this command already has open: so the command line installs, updates and
+    # removes the demo whole, as the panel's button does, with no panel running.
+    host = demo_monitor.Headless.from_cli(ctx)
+    if getattr(args, 'status', False):
+        e = demo.state(store)
+        mon = demo_monitor.status(demo.DemoContext(store, app=host))
+        vigilado = (f"; monitoring: {mon['devices']} devices, {mon['checks']} checks"
+                    if mon['devices'] or mon['checks'] else '; monitoring: not installed')
+        if not e['installed']:
+            return _ok(f"no demo installed (this code installs version {e['version']})"
+                       + (vigilado if mon['devices'] or mon['checks'] else ''))
+        hay = e['installed_version'] or 'unknown'
+        extra = (f"; version {e['version']} is available (use --replace to update)"
+                 if e['outdated'] else ' (the latest)')
+        return _ok(f"demo installed: version {hay}, {e['installed_at'] or 'date unknown'}"
+                   f"{extra}{vigilado}")
+
+    def paso(ev):
+        # Each step once, as it starts: the same steps the panel's dialog shows.
+        if ev['step_key'] != getattr(paso, 'ultimo', None):
+            paso.ultimo = ev['step_key']
+            print(f"[{ev['step_no']}/{ev['steps_total']}] {ev['step']}", flush=True)
+
     if getattr(args, 'remove', False):
-        gone = demo.remove(store, var_dir=ctx.var_dir, media_dir=media_dir)
+        prog = demo.Progress(paso, demo.texts(ctx.lang), demo.REMOVE_STEPS)
+        gone = demo.remove(store, var_dir=ctx.var_dir, media_dir=media_dir, progress=prog,
+                           app=host)
         return _ok(f"demo removed ({gone} sites)" if gone else 'there is no demo to remove')
     try:
         made = demo.build(store, actor='cli', var_dir=ctx.var_dir, media_dir=media_dir,
                           area_word=_t(ctx, 'dcim_floor_area'), lang=ctx.lang,
                           images=not getattr(args, 'no_images', False),
-                          replace=bool(getattr(args, 'replace', False)))
+                          replace=bool(getattr(args, 'replace', False)),
+                          progress=paso if not getattr(args, 'quiet', False) else None,
+                          app=host)
     except demo.DemoError as exc:
         return _err(f"{exc} (use --replace to rebuild it, or --remove)")
     counts = ', '.join(f"{k} {v}" for k, v in made.items() if k not in demo.UID_KEYS)

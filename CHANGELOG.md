@@ -8,6 +8,551 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.149] - 2026-10-16
+
+### Added
+
+- **Catalogue › Library has views of its own, each an address.** It is a declared page now
+  (`HOME_PAGES`, id `models`, in the Catalogue group) with six views — Summary, Brands,
+  Models, Platforms, Connectors and Schemas — at `/catalog/library/<view>`. The sidebar
+  unfolds them with a count beside each; «Library» reopens the view used last; each view is
+  a landing page of its own; moving between views pushes an address with that view's state.
+  The in-page row of tabs is gone, and so is the «Device types ↗» link: that entry is one
+  line away in the same sidebar group.
+- **A section's view may ask for more than its section** — `perm` on a view, generic for core
+  and module pages alike. The sidebar hides that entry until the permission pass reveals it,
+  the client never lands a reader on it (from the address or from the view remembered), and
+  the route sends a reader without it to the section. Schemas is the first: a manager's.
+- **A Summary view answers «how is the library?».** Tiles for models by shape (a stacked
+  bar), brands and how many are really in the installation, platforms out of support or
+  losing it within six months, and connectors with their families; then data quality (no
+  front image, devices without ports, brand written with no record, never placed nor in a
+  template, written by hand), support running out, and the imports — or, for a reader, the
+  brands in use. **Every figure opens its list with that filter set**, as a chip that clears.
+- **`GET /api/v1/dcim/catalog/summary`** draws it in one response, each figure counted with
+  the SAME condition as the list filter it lands on. What is installed (`in_use`, `unused`,
+  `in_use_brands`) comes only with `dcim_view`, over what the caller may see, and is `null`
+  without it; the imports only with `dcim_catalog_manage`. Imports need no table: each one
+  writes all its rows with its source and one instant, so grouping by the two recovers every
+  batch with what is left of it.
+- **The models list takes the filters the Summary lands on**: `img=none`, `ports=none`,
+  `brand_uid=none`, `source=<name>` (`manual` = written by hand), `import=<source>@<instant>`
+  and `unused=1`; and `placed=1` adds `placed` and `in_builds` to each row. «Placed» is the
+  inventory answering — devices, fitted parts and plan pieces, only with `dcim_view` and over
+  what the caller may see — so without the permission `unused` is not applied and the answer
+  says `usage: false`. `counts.models` is the whole library, for the menu.
+- **A brand and a model open in a side drawer** instead of taking the reader away from the
+  list. The brand's says how to get support (web, support page, account with a copy button),
+  its models by shape, what is placed and its platforms with their end of support, and goes on
+  to its models or its platforms; the model's shows its picture, what it is, its ports, where
+  it came from and how many are placed, with «Full record» opening the dialog of always. The
+  drawer is a generic helper (`showDrawer`, Bootstrap's offcanvas).
+- **The Platforms view filters by support**: all, out of support, expiring in under six
+  months, supported — with a count on each and the choice kept in the address (`eos`). Its
+  table colours an end of support that is near in amber, as the Summary counts it.
+- **The models list sorts and pages on the server**: `GET /api/v1/dcim/catalog` takes
+  `sort` (`maker`, `model`, `u`, `kind`, `source`, `imported`) and `dir` (`asc`/`desc`), and
+  `limit` (1–200, the page). The key picks one of the store's own ORDER BY literals
+  (`CatalogStore.SORTS`), so nothing the caller sends reaches the SQL; an unknown one is the
+  default order, not an error, and the answer says which order it applied (`sort`, `dir`).
+  Blanks sort last both ways, «written by hand» (`''` and `manual`) sorts as one, and the
+  tie-break is always maker, model, uid, so two pages never share or lose a row. Without the
+  new parameters the answer is what it was — the item form, templates and parts ask with none.
+- **The shared list table pages on the server when a list is too big to bring whole**:
+  `createListTable` takes `serverPaging: {total(ctx), maxPageSize}` — the rows are the page
+  the server answered, so it neither filters, sorts nor slices them, and the page-size selector
+  drops what the server would not serve (and «all»); sorting, paging and the page size go
+  through the same state and handlers, and the table's `prepare` fetches what they ask for. A
+  `toolbar(ctx, mode)` hook puts a table's own controls inside its card, under the header
+  (`.ss-card-tools`), in the empty states too. The fifteen existing tables are unchanged.
+- **The demo's fifteen catalogue models are complete, as real data of their class would be.**
+  Each is a fictitious model of a real class —a 2U two-socket server with 24 SFF bays and 32
+  DIMMs, a 2U eight-GPU inference server on C20 inlets, a half-width node, a 4U dual-controller
+  array, a 48-port PoE+ switch with four SFP+, a 24-port access switch, a 2U core with 48 SFP+
+  and four QSFP28, an edge router with NIM slots, a fanless carrier router, a firewall, Cat 6A
+  and LC/UPC panels, a console server with LTE, a 1U LCD console drawer with an 8-port KVM, a
+  mini PC— and brings its front and rear pictures, an inside view where a real one wants it (the
+  servers' motherboard with CPU sockets, DIMMs, fans and M.2; the array's controllers; the KVM
+  drawer opened; the mini PC's board), its ports by name and connector type with their volts and
+  watts, its bays (drives, supplies, fans, risers, OCP, modules), every one placed on its face,
+  and its size, weight, typical and maximum power, warranty, part number, a multi-line
+  description and the dates of its life — some current, two ending within six months and two
+  already out of support. The pictures are drawn by `demo_draw`, which places each socket with
+  the same line that draws it, and are kept as SVG files in `data/demo/faces/` (`python -m
+  lib.core.dcim.demo_draw` rewrites them). The specification attributes the sheet shows
+  (`width_mm`, `depth_mm`, `typical_power_w`, `poe_budget_w`, …) are named in both languages.
+
+- **The demo brings a catalogue model of everything it places, in every tree, and uses it.** On
+  a clean install it had only its fifteen devices: its 45 racks, 85 strips, 50 blanking panels,
+  its UPS and shelf, the offices' 214 devices and every fitted part pointed at no model. It now
+  brings five cabinets (`rack-types`: the rows' 42U 600 × 1200, the 42U 800 × 1000 network one
+  with side ducts, a 42U 600 × 1000, the lab's 24U and a 12U glass-door wall cabinet, with
+  their outer size, mounting depth, weight, load, doors), sixteen more devices (0U strips on
+  16 A, 32 A and three-phase 32 A feeds with their C13/C19 banks and plug, a 1U strip, 1.5, 3
+  and 6 kVA UPS, a blanking panel, a cable manager, a shelf, and a PC, an IP phone, a Wi-Fi 7
+  access point, a dome camera, a 55" display and a printer), twelve modules (`module-types`:
+  the supplies, the fans, an OCP 3.0 card, the array's controller and its power-and-cooling
+  module, SR and LR SFP+ optics, each with its ports) and ten components (`component-types`:
+  RDIMMs, a SODIMM, a CPU, NVMe, SATA and M.2 SSDs, a SAS disk, a GPU, a supercapacitor), all
+  drawn by `demo_draw_extra` in the same style and complete for their class. Every rack is the
+  cabinet of its size, every placed device its model, every strip's row has its strip's
+  outlets; every server, switch, router, firewall, array and mini PC is created from one of
+  twelve templates («Plantillas») with its parts fitted in its model's bays and a platform —
+  the demo's own firmware (`DM-NOS`, `DM-RTOS`, `DM-SecOS`, `DM-SAN OS`, `DM-Console OS`, brand
+  Demo) or Debian 12 and Ubuntu 24.04 LTS brought from the basics—; every SFP+ cage the fibre
+  reaches holds its optic (SR on OM4, LR on OS2). The small sites' racks gained a patch panel,
+  a cable manager and their blanking panels. Wall outlets and power sockets keep no model: their
+  jacks are chosen outlet by outlet. Removing the demo takes its templates, its platforms, its
+  models and the Demo brand too, except what something of one's own uses.
+- **A rack says which cabinet of the catalogue it is**: `dc_rack.type_uid`. The rack routes keep
+  it only when it names a `rack-types` model (anything else is dropped, `''` clears it), and the
+  library's «Placed» counts cabinets by it, over what the caller may see.
+- **The demo has a version, and the panel says whether the installed one is the latest.**
+  `demo.DEMO_VERSION` numbers the content (2: the complete catalogue) and must be bumped with
+  every change to what the demo writes. An install records the version, when and by whom in a
+  one-row table, `dc_demo` (a fact of this database's data, not a setting: it travels with its
+  backup and holds on every engine); removing clears it. Maintenance's card reads «Demo data
+  installed: version N (date)», or the version that would be installed, and when this code
+  brings a newer one, «A newer version is available (M)» with «Update demo data», which removes
+  and reinstalls it after the panel's confirmation. `GET /api/v1/dcim/demo` answers `version`,
+  `installed_version` (0 for a demo from before versions, older than any), `installed_at`,
+  `installed_by` and `outdated`; `main.py dcim demo --status` says the same. A config action may
+  now declare `status_fn`, a function that writes how things stand under its description.
+- **Installing, updating and removing the demo is a background job with a dialog that says
+  what it is doing.** The demo reports each step as it goes (`demo.Progress`: the catalogue
+  models with their count, templates, companies, sites, power, floors, the main site, the small
+  sites, cabling, outlets, optics, states — and, removing, its own three), the route runs it on
+  the catalogue import's job mechanism (`jobs.start_demo`, listed on the jobs screen with its
+  steps) and answers 202 with the job; `GET /api/v1/dcim/demo/jobs/<job_id>` says its step, its
+  percentage, the steps done with their counts and times, its result or the step it failed in.
+  The dialog shows all of it, can be closed and reopened while the job goes on, and a toast
+  tells when it ends; a second click while one runs reopens it, and the server refuses a second
+  job (409 with the running one's id). All or nothing: when a step fails, what was written is
+  removed and the error says which step it was. The command line prints the same steps
+  (`--quiet` to silence them).
+- **Other parts can join the demo without editing it**: `demo.register_part(name, install,
+  remove, steps)`. `install(ctx, progress)` runs after the inventory and `remove(ctx,
+  progress)` before it is removed; `ctx` (`DemoContext`) carries the store, its connector, the
+  web admin (or `None` from the command line), the actor, the language and its words, the media
+  folders and what was created —sites by key, the companies, the models, the items by label,
+  the racks by name—; `progress(step_key, done, total)` feeds the same job, the step texts
+  coming from `step_<key>` in the demo's words. A part that fails fails the install like any
+  step.
+- **The demo is watched like a real installation.** Installed from the panel, a part of the
+  demo (`lib/core/dcim/demo_monitor.py`, registered with `register_part`) registers every item
+  the demo paints —the active rack equipment of the six sites and the offices' access points,
+  cameras and printers, some 360— as a device of the registry, with its class, a documentation
+  address (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32), its profiles (SSH,
+  SNMP v2c, ICMP) and two placeholder credentials stored encrypted as any other («Demo · SSH»,
+  «Demo · Proxmox API»), and binds each item to its device. Each device gets the checks a real
+  one would —ping for all; CPU, memory and disk; the web interface, the VPN certificate, SNMP
+  hardware health, RAID— and three clusters join them: the firewall HA pair and the core VRRP
+  pair (keepalived) and the twelve-node hypervisor cluster (Proxmox). Removing the demo takes
+  all of it away, and installing twice writes nothing new.
+- **Simulated check items** (`lib/modules/simulated.py`): an item carrying a `simulated`
+  scenario is never handed to its watchful —`ModuleBase.get_conf` leaves it out, where the
+  device scope is applied— and the monitor answers it on every cycle (`Monitor.check_module`),
+  so its results go through the same change detection, `check_state` rows, history samples and
+  alerts as a real check, in the embedded scheduler and in a dedicated worker alike. The demo's
+  states —South Africa offline, the IPsec link to the recovery centre down, srv-a01-03 not
+  answering, the warnings— now come from those results, with two days of past readings, an
+  incident with its recovery and the current outages starting when they did.
+- **A simulated alert never leaves the panel.** It is raised and buffered like any other,
+  marked, and `MonitorNotifier` drops it before every channel (`deliverable`), whatever
+  Telegram, Teams, e-mail or webhooks the installation routes to.
+- `HistoryStore.record` takes the instant a sample was taken (`ts`), for a backfill.
+- The demo's progress names the monitoring steps in both languages (`step_monitor_*`), and
+  each of them ends at its total; a device that could not be created is counted and reported
+  (`not_created`), never shown as done.
+- **The demo's devices speak SNMP.** Each one that would in reality carries its device profiles
+  and is sampled by the SNMP module's own sampler; a **simulated agent**
+  (`lib/core/snmp/simulated_agent.py`) answers the client's two primitives from a description
+  the device carries, so nothing is sent: identity (sysName, sysDescr, a sysObjectID under the
+  documentation enterprise number 32473, location site › room › rack, contact, serial, model,
+  firmware), the interfaces in use with state and counters that grow with the cabling's
+  traffic, LLDP neighbours from where each cable really ends —so the real-time network map and
+  the cable drift check see the inventory's topology—, and CPU, memory, disk and temperatures on
+  the servers. Every demo device answers, the ones in trouble included: the fault is IN its
+  data (srv-a01-03 reports its NIC without link, which is why it does not answer ping). Only
+  the offline site answers nothing fresh; its identity and readings from before stay.
+- **Demo log lines**: each device's incidents and routine noise in syslog, from its address
+  (its Logs tab), with the MSGID `ss-simulated`, which the event rules skip — so a demo line
+  never fires a notification. Removing the demo deletes them.
+- `DEMO_VERSION` is 3: the demo is watched like a real installation.
+
+- **A rack chooses its cabinet model.** The rack form has a «Model» box that searches the
+  catalogue's cabinets (`rack-types`, by maker and model; an item's box keeps searching
+  devices). Picking one offers its sizes: its U, outer width and depth (inches converted),
+  numbering, post-to-post depth (`mounting_depth`) and, for a wall cabinet, front-only access.
+  Empty boxes —and on a new rack the ones still at their starting value— are filled; the ones
+  that already say something else are listed in the same dialog with «Take the model's» / «Keep
+  mine», since what was measured on site wins over the sheet. The rack's header names its model
+  and opens its sheet (the library's drawer, read-only, fetched with the new `GET
+  /api/v1/dcim/catalog?uid=`). The rack's answers carry the model's name (`type_name`), its
+  history records a change of model (an older snapshot without it reads as «none») and names it
+  (`models`), a duplicated rack keeps its model and a room plan exports it and, on import, gives
+  it to the new racks when it is a cabinet of this catalogue (counted in `lost` otherwise).
+- **Room equipment classes in the catalogue.** `pc`, `phone`, `ap`, `camera`, `display` and
+  `printer` join the catalogue's vocabulary with the item roles' own words, so a model of one
+  suggests its role when placed, and the library's «Type» column and drawer show the plans' icon
+  for each (`kind_icons`, served from the plans' catalogue). `fan` is a module class too (and is
+  read from a «fan module» / «fan tray» name). The demo's office models and fan modules use them
+  (`DEMO_VERSION` 4). Existing installations are not migrated: a model of class `other` stays so
+  until someone corrects it on its sheet.
+- **The parts search finds modules.** It searched component models only, so a mounted PSU, fan,
+  transceiver, OCP card or controller could not be picked again. It now searches module models
+  too when the device has a bay that takes modules, by the bay families of the connectors
+  document (`_DC_BAY_TAKES`): a PSU bay takes power supplies, a fan bay fans, a drive bay drives
+  and no module, an SFP cage —a bay of that type, or an interface whose type is a cage—
+  transceivers, a generic module bay anything. With a bay chosen (clicked on the face), only
+  what fits it. Taking a module sets the part's class from the model's, and the bays offered are
+  the ones its class fits, the ones made for it first; a module goes only in its own bays when
+  the device has any (no PSU in a DIMM slot).
+- **Both network maps of Infrastructure are drawn by site** (`partials/infra/_netgraph.html`),
+  the same engine for the address map and the cable map. A site is the inventory's (a device's
+  bound `dc_item` → rack → room → site), or else the first part of the location the device
+  declares (sysLocation), or «No site»; a single group draws no frame at all. Each site is a
+  frame that **folds into one box** with its count, its dots by state and the colour of its
+  worst machine — or of a link down inside it; the lines to a folded site are added up into
+  one with the number on it and the worst state. Above 120 machines the sites start folded,
+  and what each person folds or unfolds is kept per map on their account (the `infra` table
+  configuration, `net`, beside the view).
+- **Inside a site, bands**: by role on the cable map (edge, core — a switch cabled to three or
+  more switches —, access, servers, endpoints), each band ordered under the one above by the
+  barycentre of its cables; by network on the address map, drawn as the plate its machines
+  stand on, so being on a network is being inside its plate and not a line per machine. Bands
+  wrap at about 1.6:1, so two hundred servers are a block and not a column.
+- **Parts fold too**: on the cable map, what hangs from a switch by a single cable folds into
+  that switch as a «+N» pill in the colour of the worst of them and their cables; on the
+  address map, a network of more than 24 machines in a site folds into its plate. Each opens
+  with a press, or all at once from the toolbar; folding the sites leaves them alone.
+- **The sites are placed in two dimensions**: packed, then a few hundred rounds of springs
+  between BLOCKS (joined sites pull together, all of them push apart by size), then their
+  rectangles are pushed out of each other. Never a spring per machine. Deterministic.
+- **Find on the map**: a box on each map's toolbar lights what matches and what it is joined
+  to; Enter opens the site (or the folded part) it is in and frames it.
+- **The Infrastructure list filters by site**, the same sites the maps group by.
+- **A dead cable is on the map.** Both neighbour tables forget a link that stops working, so
+  the map had one line fewer and looked healthy. A port administratively up and
+  operationally down whose description names a machine of the fleet is now a `down` edge
+  (`topology._down_edges`, from `infra.service.ports_down`), drawn red and dashed; a pair that
+  still has a live cable is marked `degraded` instead. The demo's CORE-2 uplink and
+  srv-a01-03's NIC show up this way.
+- **Links between sites** (`dc_link`) are drawn on the cable map between the machines that
+  terminate them, with the state of the worse end — the inventory's rule (`links_roll`). The
+  demo's IPsec link to the recovery centre and the one to South Africa are red.
+- **`GET /api/v1/infra/map`** gives each node `site`, `room`, `rack` and `location`, a `sites`
+  list and the `site` edges; **`GET /api/v1/infra/devices`** gives each row `site` and
+  `site_name` and the `sites` list (`infra.service.places`: one read per inventory table for
+  the whole fleet). Nothing of it reaches a caller without `dcim_view`, or about a rack owned
+  by a company they may not see — the rule of the device's Location tab.
+
+- **Standard SNMP profiles for power: `ups_mib` and `entity_sensor`.** `ups_mib` reads any
+  UPS through UPS-MIB (RFC 1628): identity, battery (state, seconds on battery, runtime,
+  charge, voltage, current, temperature), input, output and bypass per line (voltage, current,
+  power, load), the output source and the alarm table, named by the well-known alarm its OID
+  ends in; detected by `upsIdentModel.0`. `entity_sensor` reads ENTITY-SENSOR-MIB (RFC 3433):
+  one row per sensor named by ENTITY-MIB, split by what it measures, with its state — how a
+  metered PDU answers with no vendor MIB (a sensor per outlet, phase and inlet), recognised by
+  its type column having a row. There is no vendor-neutral PDU MIB, and EMAN (RFC 7460/7461)
+  is served by hardly anything. Numeric OIDs, so no MIB file is needed; the product still
+  ships none.
+- **A profile's `match.probe` may name a table's column**: when the device answers the GET
+  with «no such», detection and the profile test ask for the row after it
+  (`SnmpActions._probe_answers`); a scalar probe means what it did, a silent device is not
+  asked twice.
+- **`precision_by` in the profile format**: the column that says how many decimals a reading
+  carries, per row (`entPhySensorPrecision`: 2315 with a precision of 1 is 231.5 V). The
+  profile test screen pre-reads it like `scale_by`.
+- **The demo's UPSs and PDUs are monitored devices.** Every UPS source and metered PDU of the
+  six sites (95) is a registry device bound to its PDU row, its UPS source, its item and its
+  room drawing, answered by the simulated agent through those two standard MIBs with the
+  inventory's power data: each outlet's current and power from what is plugged into it, the
+  inlet or three phases, rack temperature and humidity on the A strip; each UPS's load is what
+  the PDUs behind it draw through the power chain (bypasses included), with the site's mains
+  (230 V 50 Hz in Spain and South Africa, 208 V 60 Hz in Texas and Puerto Rico, 220 V 60 Hz in
+  Taiwan). «SAI B», which the inventory declares on bypass, says so; the Texas UPS has tired
+  batteries (on mains, battery low, 4 min of runtime, two alarms); South Africa answers nothing.
+- **`main.py dcim demo` installs, updates, reports and removes the demo's monitoring too**, with
+  no panel running: `demo_monitor.Headless` builds the stores, the module configuration and
+  the directories a monitor needs from the database and configuration the command already
+  opens; the first results and the first SNMP sweep are a monitor's, as from the panel, with
+  no notifier. `--status` adds «monitoring: N devices, M checks».
+- **`HistoryStore.record_many`**: a cycle's samples written a transaction per 200 instead of
+  one per sample; a chunk that fails is written one by one, so one bad sample costs only
+  itself. The executor uses it when the store has it.
+- **`ReturnModuleCheck.keep(prefix)`**: what a module did not ask this run stands as it is, and
+  the monitor does not prune it.
+
+### Changed
+
+- **Import is a dialog, not a view.** «Import…» (Summary, Models, the library's header)
+  opens the three doors and «Bring the basics» in a dialog; their two heavy confirmations are
+  asked in a band inside it instead of a second dialog stacked on the first. While an import
+  runs the header carries a pill with how far it is, which reopens the dialog, and the end is
+  told with a toast wherever the reader is.
+- **The Models view's toolbar is the redesigned one.** The shape buttons count what the other
+  filters leave; «By brand» and «List» share one search box that searches models in both (the
+  grid used to filter brand names); brand (with «no brand record»), class and source are
+  selects; what is set shows as chips with «Remove all»; a column chooser (remembered per user)
+  adds «Placed» and «Imported»; ticked rows get a band with Export JSON, Untick and
+  Remove…, which asks in the band itself. The list opens as a table, and a header search on
+  every view jumps to Models with the query.
+- **Old library links land on their view.** `/admin?tab=models&ctab=…` and `/dcim/catalog?…`
+  go to `/catalog/library/<view>` with the rest of their query; `ctab=import` opens Models with
+  the import dialog for a manager.
+- **The library wears the approved design's colours.** State badges are soft (a tinted
+  background and its own text colour) instead of solid red and yellow buttons — on the Summary's
+  platform tile, in «Support that expires», in the brand drawer and in the Platforms table,
+  where an ended support reads «ended <date>»; the models bar and its legend use a four-hue
+  series palette (`.ss-series-1…4`: blue, violet, amber, green) instead of Bootstrap's info cyan
+  and warning yellow; every Summary card sits under the panel's tinted header band
+  (`.ss-card-header`); the tiles and cards are painted with the panel's card surface
+  (`.ss-surface`, `--ss-surface-bg`) instead of the page's own colour, so they stand out from it
+  as in the design, and their rows are lines of the card — no fill of their own, a dashed rule,
+  the body size (`.ss-list-dashed`); and «New model» moved up beside «Import…» in the title row.
+- **The Brands view keeps the standard card's layout, as Users does.** Its view switcher was a
+  bar of its own over the card, and «Import…» sat up in the title row; both now go in the card's
+  header, left of the columns button — the panel's shared `_viewSwitcher`, then «Import…» for
+  who manages — and «Import…» leaves the title row on Brands. «In use in the installation» and
+  «By model type» are no longer pages drawn beside the table but bodies of the same card
+  (`bodyMode`/`cardsBody`, as Users' cards), so the three views share its header and its filter
+  bar, which replaces the views' own name filter. The page itself is the card edge to edge with
+  nothing over it, as Users: no title row, no search box and no padding around it (the other
+  library views keep theirs); a running import's progress pill moves to the card's header with
+  «Import…»; the line saying where brands come from became the help of the card's title; and the
+  Platforms count no longer touches the Web column.
+- **The Models view is the standard list too, as approved in the prototype.** One card edge to
+  edge drawn by `createListTable` (key `dccat`), with no library title row above it: the header
+  carries «Models» with the library's count, then «New model» and «Import…» for who manages, the
+  column chooser, «Refresh» and a menu with the twice-a-year «Import a JSON…» and «Empty a
+  source» (no longer in the filter row); inside the card, the shape buttons with their counts
+  and «By brand / List», then the filters («Search model or brand…», brand, class, source), the
+  chips and the selection band. The pagination bands of every list, top and bottom, with the
+  page-size selector (25 by default, saved per user); clicking a header sorts by it on the
+  server and again turns it round (`sort`/`dir` in the address). Every row keeps its actions
+  column — edit, clone and delete, the buttons the old table had, plus «Place ports», disabled
+  on a model with nothing to place so every row's group keeps the same width — and a click
+  elsewhere on it
+  opens the model's drawer (not the click that ticks its box), which gained «Delete» too, asking
+  in the panel's modal; several go from the selection band. «Placed» and «Ports» do not sort:
+  one is counted in memory over the inventory, the other is a JSON blob.
+- **The demo plugs each device with the cord its inlet takes**: a C20 supply (the GPU server's
+  2000 W) is fed with C19-C20, everything else with C13-C14 as before. The patch and fibre
+  panels gained their rear ports (`1-R`…`24-R`), which the demo's trunks and horizontal cabling
+  already named.
+- **The demo's progress dialog keeps one size and follows the steps.** It opened as a
+  stretchable, maximisable dialog that grew with every line; it is now a fixed-size one (`fit`:
+  no maximise, no resize handle) whose log has a fixed height of its own (`.ss-log-box`) and
+  scrolls to the newest step as it arrives — also when the dialog is reopened on a long log —
+  unless the reader has scrolled up to read an earlier one.
+- **The address map draws a next hop nobody registered once, as the router it is** (dashed,
+  with its address), and the machines that use it point at it like at any other. Every
+  machine pointing at an unregistered `.1` was a way out of its own with a curve from the
+  cloud — the fan of 130 curves the map was reported for. A machine is a way out when others
+  send their traffic to it or somebody declared its line.
+- **The icons of both maps are glyphs of the icon font in SVG text**, not a `foreignObject`
+  per box (kept as the fallback), and far away (under 0.5 px per unit) a machine's words are
+  not painted (`ss-net-far`): unreadable at that size and most of the cost of a frame.
+
+- **The demo's simulated devices are sampled on a cadence of their own.** All 356 were sampled
+  every cycle —a minute of the scheduler on SQLite, the panel's pages waiting behind it—. Now
+  once per `simulated_interval` (a SNMP module setting, 300 s; 0 = every cycle), each at its own
+  moment within it, so a cycle samples the slice whose moment came, one after another on one
+  worker, and keeps the rest. The series are one reading every five minutes, a continuous line
+  (the agent's counters are integrals of the clock). A run narrowed to one device samples it
+  now. Measured on SQLite with the demo installed (451 devices): a full SNMP sweep 66.8 s →
+  11.4 s, a steady one-minute cycle 9.6 s; a sweep under page load 244 s → 56 s.
+- **The panel's per-device scans of the recorded state go through one index per snapshot.**
+  The device list and the map asked the whole check state about each device in turn —six
+  million key comparisons for the demo—, built each device's status by walking the whole
+  module, and deep-copied the whole module configuration per device. `device_keys`,
+  `_candidates` and a per-version grouping of the checks answer the same, once: the device list
+  7.2 s → 1.2 s, the map 34.7 s → 2.3 s, on the same data.
+- **A device's reported OS is looked up only when its OS is `auto`**: every SNMP check paid a
+  scan of the whole state for a fact nobody asked.
+- **`DEMO_VERSION` is 5**: the inventory is the same as 4's, what its monitoring installs is
+  not (the UPSs and PDUs as devices), so an installed demo is offered the update.
+- **`Debug.debug_obj` does not format what it will not print**: every module's result was
+  pretty-printed at the end of its check with the log off (thirteen seconds of a demo cycle).
+
+- **Shipped data names its words by key; the words live in the core lang files.** The 53
+  SNMP profiles (label, short label, description, every metric, chart and state label), the
+  DCIM connectors and signals, the DCIM basics (models, descriptions, specs, platform notes)
+  and the demo's words no longer carry `{"es_ES": …, "en_EN": …}` or a JSON per language: a
+  shipped file writes `{"i18n": "<key>"}` and the loader resolves it
+  (`lib.i18n.materialize`) into the same per-language text as before, so every reader and
+  every screen is unchanged. Five new sections hold them (`snmp_shipped_profiles`,
+  `dcim_shipped_connectors`, `dcim_shipped_basics`, `dcim_demo_words`,
+  `dcim_demo_monitor_words`; 1,159 keys per language); `data/demo/<lang>.json` and
+  `data/demo_monitor/` are gone. What an installation writes keeps its texts inside: its own
+  profiles and groups, and the connectors document it saves — the editor is handed the
+  document with the words resolved, so a save is literal, and «restore default» returns to
+  the keys. Those sections are not sent to the page (`ui_strings`), which would otherwise
+  carry them as dead weight on every load.
+
+### Fixed
+
+- **Back and Forward between two views of the section on screen did nothing.** The pane does
+  not change, so Bootstrap's `show()` is a no-op: the address said one view and the screen went
+  on showing the other, in every section with views. The section is asked to redraw the view
+  the address names.
+- **An import that ended with an error ended in silence.** The watcher read the job's `error`
+  as «there is no job» — the 404's shape — and stopped without telling anyone; and leaving the
+  library for the inventory cleared the job id, so the end of a running import was never
+  announced at all.
+- **A model's drawer showed only its front, and had no way to place its ports.** It now shows
+  both faces, each named, with «no photo of this face» in place of a missing one, and «Place
+  ports» beside edit and clone — shutting the drawer before the editor opens, disabled with the
+  reason on a model with no ports or bays to place.
+- **A description lost its line breaks.** Written in a textarea and drawn as running text, a
+  pasted datasheet came out as one run-on paragraph in the model's drawer, its full record and a
+  cable's details; those now keep the breaks (`.ss-prewrap`), the text still escaped.
+- **«Demo DM-KVM8 KVM» had no rear picture and no ports**, and other demo models were half
+  drawn: the patch and fibre panels had no rear, no model had an inside view, and the port
+  placement only covered a few interfaces and inlets. A demo model also printed a real vendor's
+  name for its BMC; the silkscreen now says what any one says (`BMC`, `MGMT`, `CONSOLE`).
+- **The demo wrote data its own panel calls wrong.** The video recorder's disks were of kind
+  `hdd`, which is not a part kind (`disk` is), so no parts filter found them; the corridor
+  switch's fibre went into its neighbour's copper port 24 (it now lands in an SFP+); the server
+  room's 6 kW UPS was labelled «1.5 kVA»; a meeting room's TV was patched from a port called
+  `hdmi-lan` no display has (now its `eth0`); and the core switches carried parts written by
+  hand with a real vendor's part numbers.
+- **«Devices without ports» counted blanking panels and shelves**, which have none to have: the
+  quality figure and its list now leave out models of kind `blank` and `shelf`.
+- **Both network maps were unreadable past a few dozen machines.** With the demo's 356
+  devices the address map came out as one horizontal line with a fan of curves and the cable
+  map as a strip one box wide; both are now laid out by site as above.
+- **Both network maps ignored the list's filters**: filtering by state, type or text changed
+  the count above the picture and nothing in it. They draw what the list would show.
+- **The reading panel laid the whole map out again on every pointer move.** The layout is
+  kept (`_lnkMemo`/`_mapMemo`) and only what was dragged is applied over it.
+
+- **An alert the SNMP module raised about a simulated device reached the channels.** The
+  scenario items were marked and kept in, but the module's own results were not: two silent
+  sweeps of the offline demo site paged Telegram. Everything a simulated agent answers now
+  carries the simulation's mark, `ModuleBase._emit` raises its alert marked, and the notifier
+  keeps it from every channel.
+- **A probe's monitor refused `kind`**: `ProbeMonitor.send_message` took only module, item and
+  severity while modules forward `kind`, so a probe of a check that alerted raised a TypeError.
+  It takes whatever is forwarded.
+- **Installing the demo again after a restart rewrote every check**: the module store stamps
+  the items it saves (`created_at`, `updated_at`), and the comparison counted the stamps.
+- **Removing the demo's monitoring alone left the power chain bound** to devices that were
+  gone (PDU rows, UPS sources, their drawings); it unbinds them now.
+
+### Tests
+
+- **Five new files cover the library's redesign**: its views, routes, sidebar, old links and
+  history (`test_wa_dcim_library_nav.py`), the import dialog and its watcher
+  (`test_wa_dcim_library_import.py`), the Models filters and toolbar
+  (`test_wa_dcim_library_models.py`), the drawers (`test_wa_dcim_library_drawer.py`) and the
+  Summary with its API (`test_wa_dcim_library_summary.py`). A view's own permission is pinned
+  in `test_module_pages.py`, and the Summary's SQL runs on MariaDB and PostgreSQL in
+  `test_db_portability_live.py`. The tests that pinned the old tabs now pin the new shape.
+- **The Models list on the shared table is pinned end to end**: the card's layout and button
+  order, the chooser, the page-size selector and its per-user memory, header sorting asking the
+  server and turning round, each row's edit, clone and delete buttons (only for who manages) and
+  a row opening the drawer (not from the tick box), deletion from the drawer, the reader's card
+  and the grid in the same card (`test_wa_dcim_library_models.py`, 52 tests); the server's sort
+  whitelist, every key both ways with blanks last, and the page-size cap there too; and the same
+  rows and orders on MariaDB and PostgreSQL (`test_db_portability_live.py`). Every new assertion
+  was checked against a mutation of the code it guards.
+- **Every demo model is pinned complete** (`test_dcim_demo_models_complete.py`, 14 tests), over
+  a demo installed in a panel: both faces and every view have a picture the media route serves;
+  every port is a connector type its family takes; every port and bay is placed, inside the
+  picture, on a face the model has, with no two on the same spot; the counts a real model of
+  each class has; the inlets' volts and watts; the physical and life-cycle fields filled and in
+  order; the GPU server fed with C19 cords; and the files on disk equal to what the drawing code
+  makes. Checked against six mutations (a picture removed, a socket moved without redrawing, the
+  views' bays left unplaced, an unknown type, a date dropped, a model drawn as another). The
+  demo installs, rebuilds and removes cleanly on SQLite, MariaDB and PostgreSQL.
+- **The demo's catalogue is pinned used, tree by tree** (`test_dcim_demo_catalogue_used.py`,
+  19 tests), over a demo on an empty panel: each tree has its models, each complete for its
+  class (pictures, ports and bays typed and placed, power, size, load, life); none in the
+  Summary's quality figures; every rack the cabinet of its size, every placed device and every
+  part a demo model of the right tree, the strips' outlets their model's, every templated device
+  with its template's parts in bays its model has and a platform, the optics in exactly the
+  cages the fibre reaches, both companies and all six sites using them, «Placed» > 0 for every
+  model; the rack model through the API; building twice refused, removing twice converging to
+  no demo row while Debian and Ubuntu stay, and a cabinet a user's rack uses kept. The
+  SVG-equals-drawing guard covers the new pictures, and the demo installs and goes whole on
+  MariaDB and PostgreSQL (`test_db_portability_live.py`). Checked against thirteen mutations.
+- **The demo's version and its progress are pinned**: `test_dcim_demo_version.py` (7 tests)
+  keeps a fingerprint of the demo's content —its models' data, pictures, texts, templates,
+  platforms and the counts of what a build writes— next to `DEMO_VERSION` and fails with «bump
+  DEMO_VERSION» when they part, and checks the version recorded, offered when older, updated
+  and forgotten, by the store, the route and `--status`; `test_dcim_demo_progress.py` (6 tests)
+  the job's steps in order to 100 %, one job at a time (route and runner), the jobs screen, a
+  failing part reporting its step with the demo removed, a registered part installed with its
+  context and removed, and, in `node`, the dialog, the status line with its update button and a
+  second click reopening the dialog. `test_wa_dcim_demo_admin.py` follows the routes' jobs.
+  Checked against eleven mutations.
+- `tests/integration/test_dcim_demo_monitor.py` (23): devices, profiles, credentials, the
+  name already taken, the checks and clusters, no unrelated module enabled, the states derived
+  from the results (and gone when the feed stops), a cycle that probes nothing, the history,
+  the past written before the scheduler can answer, no external delivery with a real alert as
+  the control, install twice, no install without the panel, a clean removal; and SNMP: the
+  identity of every demo device, a valued header measure and raw data on every sheet, the fault
+  of srv-a01-03 in its own data, the offline site keeping its identity with nothing fresh,
+  header measures declared
+  and valued, the Logs tab, the map's LLDP links equal to the cabling port by port, traffic
+  rates from the second sweep. Checked against twelve mutations.
+- `tests/unit/test_simulated_checks.py` (15): the scenario, the window of a reading, the merge
+  into a module's result, the module never seeing them, the notifier keeping them in, event
+  rules skipping simulated log lines, and the simulated agent (its MIB, growing counters, a
+  silent device, the client asking it and never the network).
+- `tests/unit/test_dcim_demo_part_steps.py` (3): every step of every demo part has its words.
+- `tests/e2e/test_dcim_demo_monitor_live.py` (1): install and remove on
+  MySQL/MariaDB/PostgreSQL.
+- `tests/integration/test_wa_dcim_rack_model.py` (11): the model's name on every rack answer,
+  one model by uid, the history's three versions and their names, an old snapshot, a refused
+  model, the plan import, the room classes with their icons and the suggested role.
+- `tests/integration/test_wa_dcim_rack_model_ui.py` (9, node): the box's tree, what a sheet
+  says, the offer on a new and an existing rack, take and keep, the header badge and the
+  read-only sheet, the history and the library's icons.
+- `tests/integration/test_wa_dcim_parts_modules.py` (9, node): the search by bay, a chosen bay,
+  the part's class, the bays each class is offered.
+- `tests/meta/test_dcim_bay_takes.py` (4): one rule per bay type of the connectors document.
+- `tests/unit/test_dcim_room_kinds.py` (6): the vocabulary, the fan, the demo's classes. All
+  checked against 26 mutations.
+- **The network maps are pinned in `node` and by the API**: `test_wa_infra_netgraph.py` (13
+  tests: grouping, folding and what it adds up, no overlap, the same picture twice, two
+  dimensions, filters, states, the unregistered router, the folds on the account, and 1008
+  machines with 1428 cables laid out and drawn inside a budget — under 100 ms each on a
+  workstation), `test_wa_infra_places.py` (8: sites, the site link and its state, the
+  inventory permission and company boundary) and `test_infra_netviews_topology.py` (14: down
+  and degraded edges, ports down, the declared location). 25 mutations of the engine, the
+  views and the server, all caught. Eighteen guards of `test_wa_infra_section.py` and
+  `test_wa_infra_group_views.py` follow the new structure.
+- **`test_dcim_demo_monitor.py` installs the demo once per session**, under a lock every xdist
+  worker shares, and copies it per module and per test that changes it (the inventory alone is
+  kept for the test that installs the part by itself); it was one install per worker plus two
+  more, sixteen minutes; four now on four workers. New: the UPSs and PDUs bound and answering
+  with the load behind them, the two UPSs that tell something, their alerts marked and kept from
+  every channel, removing
+  the part unbinding the power chain, the cadence (nothing due right after a sweep and nothing
+  lost, a fifth a minute later, all five minutes later), and the command line installing,
+  reporting and removing it all with no panel (32 tests).
+- **`test_simulated_power_and_load.py`** (22): UPS-MIB and ENTITY-SENSOR-MIB as the agent
+  answers and the shipped profiles read them, a probe that names a column, `precision_by`,
+  `is_due` spread over a fleet,
+  `keep` and the prune, the marked alert, the probe's monitor, the state index answering what
+  the scans did, and `debug_obj` with the log off. **`watchfuls/snmp/tests/
+  test_simulated_cadence.py`** (8): the module's cadence and marks end to end with no network.
+  **`test_history_record_many.py`** (4): batched writes equal one-by-one, fewer commits, a bad
+  sample costing only itself, a vanished series created again. The live engines run a cycle
+  too (`test_dcim_demo_monitor_live.py`).
+- **The move to i18n keys is pinned.** `tests/fixtures/i18n_shipped_before.json` was captured
+  BEFORE the move from every shipped profile, metric, state, connector, signal, basic and demo
+  word in each language; `test_i18n_shipped_texts.py` (14) compares it with what the readers
+  resolve now, and checks whose words win (an override's, a copied file's keys, a saved
+  connectors document, the demo's copies). `tests/meta/test_i18n_shipped_data.py` (8): no
+  shipped JSON holds a map keyed by language, no file outside `lang/` is named after one,
+  every referenced key exists in every language, none is orphaned, and the data sections stay
+  off the page. The dict-literal guard in `test_i18n_no_text_in_code.py` now covers the
+  modules too, and the i18n key audits ignore the data sections.
+
 ## [0.0.1+build.148] - 2026-10-15
 
 ### Added

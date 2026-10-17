@@ -18,8 +18,6 @@
 
 //: Cuál de las tres vistas: `table`, `usage` o `trees`.
 let _dcBrandView = 'table';
-//: Lo que se busca en las vistas que no son la tabla (la tabla trae su propia barra de filtro).
-let _dcBrandQ = '';
 //: Qué marcas están plegadas en «Por tipo de modelo». Plegadas y no desplegadas: lo normal es
 //: verlas abiertas, y lo que se recuerda es la excepción.
 let _dcBrandShut = new Set();
@@ -45,49 +43,24 @@ function _dcBrandGoView(cual) {
     renderDcim();
 }
 
-/** El selector: el mismo grupo de botones que «Por fabricante / Lista completa» de Modelos. */
-function _dcBrandSwitchHtml() {
-    const ahora = _dcBrandViewNow();
-    return `<div class="btn-group btn-group-sm" role="group">${_DCBRAND_VIEWS.map(v => `<button
-            class="btn ${v.id === ahora ? 'btn-primary' : 'btn-secondary'}"
-            onclick="_dcBrandGoView(${jsStr(v.id)})" title="${escAttr(t(v.label))}">
-            <i class="bi ${v.icon}"></i></button>`).join('')}</div>`;
+/** Lo que va en la cabecera de la tarjeta a la izquierda del selector de columnas, como en
+ *  Usuarios: el selector de vistas —el del panel, `_viewSwitcher`— y, a quien gestiona,
+ *  «Importar…», que trae las marcas con sus modelos. */
+function _dcBrandLeadHtml(ctx) {
+    const vistas = _DCBRAND_VIEWS.map(v => ({id: v.id, icon: v.icon, label_key: v.label}));
+    return `${_dcLibPillHtml()}
+        ${_viewSwitcher(vistas, _dcBrandViewNow(), '_dcBrandGoView', 'view_mode')}
+        ${(ctx || {}).puede ? `<button class="btn btn-sm btn-primary ms-1"
+            onclick="_dcLibImportOpen()"><i class="bi bi-download me-1"></i>${
+            esc(t('dcim_lib_import_btn'))}</button>` : ''}`;
 }
 
-/** Las filas que deja el filtro de estas vistas: nombre, descripción o número de cliente. */
-function _dcBrandFiltered() {
-    const q = String(_dcBrandQ || '').trim().toLowerCase();
-    return ((_dcBrands || {}).rows || []).filter(b => !q || [b.name, b.description, b.account]
-        .some(x => String(x || '').toLowerCase().includes(q)));
-}
-
-/** Las dos vistas que no son la tabla: su barra y su cuerpo. El cuerpo va aparte para que
- *  escribir en el filtro redibuje sólo eso — redibujar la pestaña entera se lleva el foco. */
-function _dcBrandViewsHtml() {
-    const puede = _dcimMay('dcim_catalog_manage');
-    return `<div class="ss-toolrow mb-2">
-            ${_dcBrandSwitchHtml()}
-            <input class="form-control form-control-sm" style="max-width:16rem"
-                   value="${escAttr(_dcBrandQ)}"
-                   placeholder="${escAttr(t('dcim_cat_filter_maker'))}"
-                   oninput="_dcBrandQ=this.value;_dcBrandRedraw()">
-            ${puede ? `<button class="btn btn-sm btn-primary" onclick="_dcBrandEdit(null)">
-                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_brand_new'))}</button>` : ''}
-            <span class="text-muted ss-fs-2 ss-toolrow-text">${esc(t(
-                (_DCBRAND_VIEWS.find(v => v.id === _dcBrandViewNow()) || {}).label || ''))}</span>
-        </div>
-        <div id="dcbrd-view">${_dcBrandViewBody()}</div>`;
-}
-
-function _dcBrandRedraw() {
-    const el = document.getElementById('dcbrd-view');
-    if (el) el.innerHTML = _dcBrandViewBody();
-}
-
-function _dcBrandViewBody() {
+/** El cuerpo de las dos vistas que no son la tabla, sobre las filas que deja la barra de
+ *  filtros de la tabla: la misma barra filtra las tres. */
+function _dcBrandViewBody(filas) {
     const v = _dcBrandViewNow();
-    if (v === 'usage') return _dcBrandUsageHtml();
-    const rows = _dcBrandFiltered();
+    const rows = filas || [];
+    if (v === 'usage') return _dcBrandUsageHtml(rows);
     if (!((_dcBrands || {}).rows || []).length) return _dcBrandMsg(t('dcim_brand_none'));
     if (!rows.length) return _dcBrandMsg(t('dcim_brand_q_none'));
     return _dcBrandTreesHtml(rows);
@@ -100,7 +73,7 @@ function _dcBrandMsg(texto) {
 
 // ── En uso en la instalación ────────────────────────────────────────────────────────────
 
-function _dcBrandUsageHtml() {
+function _dcBrandUsageHtml(filas) {
     const d = _dcBrands || {};
     if (!d.asked) {
         _dcBrandsLoad();
@@ -108,12 +81,12 @@ function _dcBrandUsageHtml() {
             </div></div>`;
     }
     if (!d.usage) return _dcBrandMsg(t('dcim_brand_use_noperm'));
-    const rows = _dcBrandFiltered().filter(b => Number((b.in_use || {}).items || 0) > 0)
+    const rows = (filas || []).filter(b => Number((b.in_use || {}).items || 0) > 0)
         .sort((a, b) => (b.in_use.items - a.in_use.items)
             || String(a.name || '').localeCompare(String(b.name || '')));
     if (!rows.length) return _dcBrandMsg(t('dcim_brand_use_none'));
     const n = (b, k) => `<td class="text-end ss-tabular">${esc(String(b.in_use[k] || 0))}</td>`;
-    return `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_brand_use_intro'))}</div>
+    return `<div class="text-muted ss-fs-2 px-3 pt-2 pb-1">${esc(t('dcim_brand_use_intro'))}</div>
     <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
         <thead><tr>
             <th>${esc(t('dcim_brand_name'))}</th>
@@ -153,14 +126,14 @@ function _dcBrandGoPlats(uid, nombre) {
 
 function _dcBrandFold(uid) {
     if (_dcBrandShut.has(uid)) _dcBrandShut.delete(uid); else _dcBrandShut.add(uid);
-    _dcBrandRedraw();
+    if (typeof renderDcBrd === 'function') renderDcBrd();
 }
 
 function _dcBrandTreesHtml(rows) {
     // Con modelos O con plataformas: una marca que sólo hace sistemas también está en el catálogo.
     const conModelos = rows.filter(b => Number(b.models || 0) + Number(b.platforms || 0) > 0);
     if (!conModelos.length) return _dcBrandMsg(t('dcim_brand_trees_none'));
-    return `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_brand_trees_intro'))}</div>
+    return `<div class="text-muted ss-fs-2 px-3 pt-2 pb-1">${esc(t('dcim_brand_trees_intro'))}</div>
     <div class="table-responsive"><table class="table table-sm align-middle mb-0">
         <tbody>${conModelos.map(b => {
             const cerrada = _dcBrandShut.has(String(b.uid));

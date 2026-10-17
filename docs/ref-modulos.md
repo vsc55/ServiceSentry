@@ -926,7 +926,7 @@ resolución centrada en el dispositivo, no el bucle de comprobaciones:
 ```json
 {
   "id": "if_generic",
-  "label": {"en_EN": "Network interfaces", "es_ES": "Interfaces de red"},
+  "label": {"i18n": "if_generic/label"},
   "match": {"sysobjectid_prefix": "1.3.6.1.4.1.8072"},
   "metrics": [
     {"key": "if_in", "walk": "1.3.6.1.2.1.2.2.1.10", "kind": "counter", "unit": "B/s",
@@ -934,6 +934,12 @@ resolución centrada en el dispositivo, no el bucle de comprobaciones:
   ]
 }
 ```
+
+Los **textos** de un perfil del producto no están en el fichero: `{"i18n": "<clave>"}` nombra
+una palabra de la sección `snmp_shipped_profiles` de los ficheros de idioma del core (ver
+[explica-i18n.md](explica-i18n.md#los-textos-de-los-datos-que-trae-el-producto)). Un perfil
+propio de la instalación escribe los suyos: una cadena, o un texto por idioma
+(`{"es_ES": "…", "en_EN": "…"}`).
 
 | Campo | Qué es |
 |---|---|
@@ -978,7 +984,7 @@ reinicio y se descarta la muestra** (a un terabit tardaría 4,6 años en dar la 
 casos se guarda la nueva referencia: perder un punto cuesta un punto; inventarlo cuesta la
 gráfica.
 
-Se envían **nueve** perfiles genéricos, todos de MIBs estándar para que funcionen sin saber
+Se envían **once** perfiles genéricos, todos de MIBs estándar para que funcionen sin saber
 quién fabricó el dispositivo, y **disjuntos** entre sí (más `hr_system` —carga por procesador,
 procesos y usuarios, el complemento de `hr_storage`—, los quince de Synology, el de los SAI de
 APC, el de los switches de Linksys, el de RouterOS de MikroTik, los tres de Windows, y los
@@ -995,6 +1001,8 @@ grupos de más abajo):
 | `hr_storage` | HOST-RESOURCES-MIB | Uso y capacidad por volumen |
 | `disk_io` | UCD-SNMP-MIB | Bytes y operaciones por segundo, por dispositivo de bloque |
 | `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+| `ups_mib` | UPS-MIB (RFC 1628) | Cualquier SAI sin su MIB: batería (estado, carga, autonomía, temperatura), de qué tira la salida, entrada, salida y bypass por línea con su carga, y las alarmas. Ver `docs/explica-snmp.md` |
+| `entity_sensor` | ENTITY-SENSOR-MIB (RFC 3433) | Los sensores declarados de la forma estándar —el de una PDU medida por toma, fase y entrada, o los de temperatura de un equipo de red—, separados por lo que miden y con los decimales que dice cada uno (`precision_by`). Se reconoce porque su columna de tipo tiene filas |
 
 | `bridge_vlans` | Q-BRIDGE-MIB | Las **VLAN configuradas**, con el nombre que alguien les puso. La tabla de interfaces sólo dice que una fila es «virtual»: no dice qué VLAN es, cómo se llama, ni que existe cuando aún no hay nada puenteado a ella |
 | `lldp` | LLDP-MIB | **A quién ve el dispositivo al otro lado de sus propios cables**, y por cuál de los puertos de ellos. Lo único en SNMP que contesta la topología con exactitud: lo demás dice quién alcanza a quién. Una fila por vecino **y puerto**. Sólo contesta donde alguien corre un agente LLDP (`lldpd` en Linux, de fábrica en casi todo switch gestionable) |
@@ -1105,7 +1113,7 @@ Un **grupo** es una entrada del mismo catálogo cuyo `includes` nombra otras ent
 ```json
 {
   "id": "grp_synology",
-  "label": {"es_ES": "NAS Synology (todo)"},
+  "label": {"i18n": "grp_synology/label"},
   "includes": ["synology_system", "synology_disks", "…"],
   "match": {"sysobjectid_prefix": "1.3.6.1.4.1.6574", "supersedes": ["synology_system", "…"]}
 }

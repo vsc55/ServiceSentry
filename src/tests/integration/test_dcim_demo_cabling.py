@@ -204,7 +204,9 @@ class TestTheCCTV:
         a = {c['b_item'] if c['a_item'] == nvr else c['a_item'] for c in cables
              if nvr in (c['a_item'], c['b_item'])}
         assert {racked[u]['label'] for u in a} == {'CORE-1', 'CORE-2'}
-        discos = [p for p in store.parts_of([nvr]) if p['kind'] == 'hdd']
+        # A disk is a `disk` —the parts' vocabulary—, not an `hdd`: an unknown kind is one no
+        # filter and no screen of the parts finds.
+        discos = [p for p in store.parts_of([nvr]) if p['kind'] == 'disk']
         assert discos and discos[0]['qty'] == 8
         assert '30' in discos[0]['description']              # how long it keeps (LOPDGDD 22.3)
         assert racked[nvr]['demo_state'] == 'warning'

@@ -1,0 +1,45 @@
+{# ================================================================
+   The side drawer: `showDrawer(title, html, actions)` / `hideDrawer()`.
+
+   Bootstrap's offcanvas, from the right, over the list it was opened from (markup in
+   partials/modals/_dialogs.html). For the summary of one row — a brand, a catalogue model —
+   where a dialog would hide the list: with the drawer the next row is still there, and clicking
+   it re-fills the same drawer instead of stacking a second one.
+
+   The same contract as `showHtmlModal`: the caller composes the body and the action buttons,
+   escaped; this only puts them in place. Escape and a click outside close it (Bootstrap).
+   ================================================================ #}
+
+/** Open (or re-fill, if already open) the drawer. *actions* is markup for the header. */
+function showDrawer(title, html, actions) {
+    const el = document.getElementById('ssDrawer');
+    if (!el) return;
+    const tt = document.getElementById('ssDrawerTitle');
+    if (tt) tt.textContent = title || '';
+    const body = document.getElementById('ssDrawerBody');
+    if (body) body.innerHTML = html || '';
+    const slot = document.getElementById('ssDrawerActions');
+    if (slot) {
+        slot.innerHTML = actions || '';
+        // The header's size, whoever sent the button — the same rule as the dialog's footer.
+        slot.querySelectorAll('.btn').forEach(b => b.classList.add('btn-sm'));
+    }
+    if (window.bootstrap && bootstrap.Offcanvas) {
+        const oc = bootstrap.Offcanvas.getOrCreateInstance
+            ? bootstrap.Offcanvas.getOrCreateInstance(el) : new bootstrap.Offcanvas(el);
+        if (!el.classList.contains('show')) oc.show();
+    }
+}
+
+/** Whether the drawer is on screen. */
+function drawerShown() {
+    const el = document.getElementById('ssDrawer');
+    return !!(el && el.classList.contains('show'));
+}
+
+function hideDrawer() {
+    const el = document.getElementById('ssDrawer');
+    if (!el || !window.bootstrap || !bootstrap.Offcanvas) return;
+    const oc = bootstrap.Offcanvas.getInstance ? bootstrap.Offcanvas.getInstance(el) : null;
+    if (oc) oc.hide();
+}

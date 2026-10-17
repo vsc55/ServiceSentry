@@ -1,13 +1,7 @@
 {
   "id": "grp_synology",
-  "label": {
-    "en_EN": "Synology NAS (everything)",
-    "es_ES": "NAS Synology (todo)"
-  },
-  "description": {
-    "en_EN": "Every profile written for a Synology — system, disks, SMART, volumes and RAID, disk and volume I/O, SSD cache, Ethernet ports, expansion units, iSCSI, NFS, GPU, high availability, UPS, SMB and service users — plus what a NAS also serves as the Linux machine it is: CPU, load averages, memory and swap from net-snmp's own tree, interfaces, filesystems, and the IP, TCP/UDP and ICMP counters.",
-    "es_ES": "Todos los perfiles escritos para un Synology: sistema, discos, SMART, volumenes y RAID, E/S de discos y volumenes, cache SSD, puertos Ethernet, unidades de expansion, iSCSI, NFS, GPU, alta disponibilidad, SAI, SMB y usuarios por servicio; mas lo que un NAS sirve por ser la maquina Linux que es: CPU, medias de carga, memoria y swap del arbol de net-snmp, interfaces, sistemas de ficheros y los contadores IP, TCP/UDP e ICMP."
-  },
+  "label": {"i18n": "grp_synology/label"},
+  "description": {"i18n": "grp_synology/desc"},
   "includes": [
     "synology_system",
     "synology_disks",

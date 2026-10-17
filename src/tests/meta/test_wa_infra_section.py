@@ -664,7 +664,7 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         return _read(os.path.join(INFRA, '_map.html'))
 
     def test_an_empty_network_is_not_a_branch(self):
-        layout = _fn(self._js(), '_infraMapLayout')
+        layout = _fn(self._js(), '_infraMapBase')
         assert 'if (!members.length) continue;' in layout, (
             'every declared route is drawn again, whether anything lives there or not')
 
@@ -672,7 +672,7 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         """It is not a place where two machines meet, which is the only question this map
         exists to answer. Docker gives every device its own 172.17.0.0/16, and a router declares
         one per VLAN: on the reported screen those were most of the picture."""
-        layout = _fn(self._js(), '_infraMapLayout')
+        layout = _fn(self._js(), '_infraMapBase')
         assert 'members.length > 1 && !net.private' in layout
         assert 'solo.set(' in layout, 'they are dropped rather than folded'
 
@@ -680,7 +680,7 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         """Two NAS both holding 172.17.0.1 are not neighbours: either it is not one network or
         one of them is unreachable, and in both cases joining them is a lie. The server flags
         it; this must not undo the flag by counting members."""
-        assert '!net.private' in _fn(self._js(), '_infraMapLayout')
+        assert '!net.private' in _fn(self._js(), '_infraMapBase')
 
     def test_but_the_count_of_both_is_said(self):
         """Silently dropping them would be a map that knows something and does not say it."""
@@ -692,33 +692,41 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         """Not "every network without a column": a router's own network HAS a member, it is
         just drawn on the router. Counting it here puts a number under the picture that says
         something untrue about the fleet — which it did."""
-        layout = _fn(self._js(), '_infraMapLayout')
+        layout = _fn(self._js(), '_infraMapBase')
         assert 'filter(n => !(n.members || []).length).length' in layout
 
     def test_a_machine_is_drawn_once(self):
         """Once per network would be four boxes with one name, and "which of these is the
         machine" is not a question a map should raise. The others are a thin dashed line."""
-        layout = _fn(self._js(), '_infraMapLayout')
+        layout = _fn(self._js(), '_infraMapBase')
         assert 'if (!home.has(uid)) home.set(uid' in layout
-        assert 'home.get(uid) === s.net' in layout
+        assert 'home.get(uid) === n.net' in layout
 
     def test_and_one_that_shares_no_network_is_still_on_the_picture(self):
         """It has an address and a state, and dropping it would be the map quietly deciding a
         machine does not exist because nothing else is on its subnet."""
-        layout = _fn(self._js(), '_infraMapLayout')
-        assert 'orphans' in layout
-        assert 'infra_map_no_shared' in self._js()
+        layout = _fn(self._js(), '_infraMapBase')
+        # Its band is `~none`, labelled as what it is — not a network.
+        assert "'~none'" in layout
+        assert 'infra_map_no_shared' in layout
 
     def test_the_way_out_is_what_the_device_said_and_not_a_guess(self):
-        """A machine another one points at, or one pointing at an address nobody here owns.
-        Both are the device talking, which is what earns it the top of the picture."""
-        layout = _fn(self._js(), '_infraMapLayout')
-        assert "e.kind === 'gateway' && e.to" in layout and "e.kind === 'exit'" in layout
+        """A machine another one points at, or one whose line somebody declared. Both are the
+        device (or its owner) talking, which is what earns it the top of its site.
+
+        A machine merely USING a next hop nobody registered is not a way out: that is the
+        router nobody added, drawn once as itself (`gw:<address>`). It was a way out per
+        machine, and at 130 of them it was the fan of curves the map was reported for."""
+        layout = _fn(self._js(), '_infraMapBase')
+        assert "e.kind === 'gateway' && e.to" in layout and "e.kind === 'exit' && e.said" in layout
+        assert "'gw:' + e.address" in layout
         assert 'device_type' not in layout, (
             'the map has started deciding what a router is from the registry')
 
     def test_a_fleet_with_no_route_off_it_gets_no_cloud(self):
-        assert 'if (!L.exits.length) return' in _fn(self._js(), '_infraMapCloud')
+        # No exit line, no cloud: the cloud is placed only when one is drawn.
+        assert "l.kind === 'exit'" in _fn(self._js(), '_infraMapPlace')
+        assert 'if (!p) return' in _fn(self._js(), '_infraMapCloud')
 
     def test_the_wires_do_not_assume_a_box_is_where_it_was_generated(self):
         """They were orthogonal elbows — down, across, down — which is only readable while the
@@ -728,8 +736,10 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         assert 'function _infraMapElbow(' not in self._js()
         # The line's two ends are BOXES, worked out in the list and turned into a path by the
         # shared maker — one answer for both maps about which sides a cable leaves by.
-        assert 'a: cloud, b: mach(g)' in _fn(self._js(), '_infraMapLines')
-        assert 'ssCanvasCable(w.a, w.b)' in _fn(self._js(), '_infraMapWires')
+        # Every end a line can have is a BOX in `L.ends` — machines, plates, folded sites and
+        # the outside — so the shared maker is always handed two boxes.
+        assert 'ends.set(' in _fn(self._js(), '_infraMapPlace')
+        assert 'ssCanvasCable(a, b)' in _fn(self._js(), '_infraMapWires')
 
     def test_the_cables_are_not_drawn_twice(self):
         """They have a map of their own now. Two pictures of one cable are two things to keep
@@ -746,14 +756,15 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         does, which is the one thing a map must not do."""
         # The legend renders a declared list now, because it is drawn twice: under the
         # picture, and inside an exported one where there is no "under the picture".
+        # Read off the same table the lines are drawn from, so it cannot stop matching them.
         keys = _fn(self._js(), '_infraMapKeys')
-        assert keys.count('stroke:') == 3, 'the legend stopped matching the lines'
+        assert '_MAP_LINE[k]' in keys, 'the legend stopped matching the lines'
         assert '_infraMapKeys()' in _fn(self._js(), '_infraMapLegend')
-        for key in ('infra_map_legend_net', 'infra_map_legend_gw', 'infra_map_legend_exit'):
-            assert key in keys, key
+        for kind in ('serves', 'also', 'span', 'exit'):
+            assert f"'{kind}'" in keys, kind
             for lang in ('es_ES', 'en_EN'):
-                assert f"'{key}'" in _read(os.path.join(
-                    SRC, 'lib', 'i18n', 'lang', f'{lang}.py')), (key, lang)
+                assert f"'infra_map_line_{kind}'" in _read(os.path.join(
+                    SRC, 'lib', 'i18n', 'lang', f'{lang}.py')), (kind, lang)
 
     def test_it_is_a_window_and_not_a_picture_squashed_into_the_pane(self):
         """The whole complaint, in one property: the old one set `max-width` to its own width
@@ -1298,8 +1309,8 @@ class TestACableLeavesByTheSideFacingTheOtherEnd:
         has already chosen the side, which is the thing being fixed."""
         # Worked out where the LIST of lines is built, which is what the drawing, the
         # lighting and the card that reads one all read.
-        body = _fn(self._src('_map.html'), '_infraMapLines')
-        assert 'w: _MAP.BOX_W' in body and 'w: _MAP.COL - 16' in body, \
+        body = _fn(self._src('_map.html'), '_infraMapWires')
+        assert 'L.ends.get(w.a)' in body and 'L.ends.get(w.b)' in body, \
             'the address map hands over points again'
 
 class TestWhatIsUnderThePointerLightsItsOwnLines:
@@ -1332,8 +1343,11 @@ class TestWhatIsUnderThePointerLightsItsOwnLines:
     def test_and_a_network_is_not_named_the_way_a_machine_is(self):
         """A uid and a subnet are two namespaces sharing one attribute, and nothing stops a
         machine being called `192.168.1.0/24`."""
-        body = self._fn('_map.html', '_netKey')
-        assert "'net:'" in body, 'a network and a machine could answer to the same name'
+        # A plate is `band:<site>|<network>` (`_netgraph.html`), which no uid can be, and the
+        # key is that id as drawn.
+        body = self._fn('_map.html', '_infraMapBase')
+        assert "'band:' + g + '|' + key" in body, \
+            'a network and a machine could answer to the same name'
 
     def test_and_the_pointer_lights_them_without_redrawing(self):
         for name, mark, paint in self.MARKS:
@@ -1554,7 +1568,7 @@ class TestAnExportedMapIsStillReadable:
             body = _fn(src, fn)
             # A label, and a stroke — its own or the one the lines are drawn from.
             assert 'label' in body, f'{fn} says nothing'
-            assert 'stroke' in body or '_LNK_STROKE' in body, \
+            assert 'stroke' in body or '_LNK_STROKE' in body or '_MAP_LINE' in body, \
                 f'{fn} draws no line beside what it says'
             assert fn + '()' in src, f'{fn} is declared and read by nobody'
 
@@ -1621,19 +1635,23 @@ class TestALineOnTheAddressMapIsSomethingToRead:
         """Three things need the same list — the drawing, the lighting of one machine's lines,
         and the card that reads the one under the pointer. Two of them would otherwise have to
         work out "which line is this" from coordinates."""
+        # The list is the folded one (`ssNetFold`), on the layout every reader shares.
         src = self._js()
-        assert '_infraMapLines(L)' in _fn(src, '_infraMapWires')
-        assert '_infraMapLines(L)' in _fn(src, '_infraMapWireCard')
+        assert 'L.links' in _fn(src, '_infraMapWires')
+        assert 'L.links[i]' in _fn(src, '_infraMapWireCard')
+        assert 'ssNetFold(' in _fn(src, '_infraMapBase')
 
     def test_and_each_kind_says_what_it_means_in_one_place(self):
         src = self._js()
         table = src.split('const _MAP_LINE = {')[1].split('};')[0]
-        for kind in ('exit', 'serves', 'home', 'also', 'way'):
+        # `home` and `way` went with the plates: being on a network is being inside its plate,
+        # and a machine's own way out is the plate's line, added up.
+        for kind in ('exit', 'serves', 'also', 'span'):
             assert kind + ':' in table, kind
             assert "infra_map_line_" in table
         for lang in ('es_ES', 'en_EN'):
             words = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
-            for kind in ('exit', 'serves', 'home', 'also', 'way'):
+            for kind in ('exit', 'serves', 'also', 'span'):
                 assert "'infra_map_line_%s'" % kind in words, (kind, lang)
 
     def test_and_a_hairline_can_be_pointed_at(self):

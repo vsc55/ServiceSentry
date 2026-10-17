@@ -62,6 +62,12 @@ const _DCIM_KIND = {
     ]},
     rack: {url: 'racks', parent: 'room_uid', title: 'dcim_rack', fields: [
         {name: 'name', label: 'dcim_rack_name', w: '12rem', req: true},
+        // **Qué armario del catálogo es.** Se busca entre los armarios (`pickTree`) y no entre
+        // los equipos: el servidor solo acepta aquí un modelo `rack-types`. Elegido, se ofrece
+        // tomar sus medidas en las casillas de abajo (`_dcimRackOffer`): las vacías se llenan y
+        // las que ya dicen otra cosa se preguntan — lo medido aquí manda sobre la ficha.
+        {name: 'type_uid', label: 'dcim_cat_model', tt: 'dcim_rack_model_tt', pick: 'type',
+         pickTree: 'rack-types', nameKey: 'type_name', w: '18rem'},
         // El mueble también se compra, y es el que sale por más dinero en el albarán. Lo
         // llevaban el equipo y los dos cables, y lo que los sostiene no.
         {name: 'asset', label: 'dcim_item_asset', tt: 'dcim_asset_tt', w: '10rem'},
@@ -384,7 +390,8 @@ function _dcimFormBody() {
     // Un equipo en aviso o caído dice por qué, arriba: es lo primero que se busca al pulsarlo.
     // Y si ES una regleta declarada, cuál y el botón a su ficha (`_dcPduItemBlock`).
     const porque = f.kind === 'item'
-        ? _dcimWhyHtml(row, 'dcim-form-why') + _dcPduItemBlock(f.uid) : '';
+        ? _dcimWhyHtml(row, 'dcim-form-why') + _dcPduItemBlock(f.uid)
+        : f.kind === 'rack' ? _dcimRackOfferHtml(f) : '';
     // Sin zonas declaradas, como siempre: una sede tiene cuatro casillas y partirlas en grupos
     // sería poner cinco rótulos para ordenar cuatro cosas.
     if (!zonas) return `${porque}${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
@@ -547,8 +554,13 @@ async function _dcimPickGo() {
     if (!p) return;
     p.rows = null;
     _dcimPickDraw();
-    const d = await apiGet('/api/v1/dcim/catalog?tree=device-types'
+    // El árbol lo dice el campo: un equipo busca entre los dispositivos y un armario entre los
+    // armarios —el servidor no acepta otra cosa en cada uno—.
+    const fld = ((_DCIM_KIND[(_dcimForm || {}).kind] || {}).fields || [])[p.idx] || {};
+    const arbol = fld.pickTree || 'device-types';
+    const d = await apiGet(`/api/v1/dcim/catalog?tree=${encodeURIComponent(arbol)}`
                            + `&q=${encodeURIComponent(p.q || '')}`) || {};
+    if (_dcimPick !== p) return;
     p.rows = d.types || [];
     _dcimPickDraw();
 }
@@ -582,17 +594,116 @@ function _dcimTypeName(r) {
         .filter(Boolean).join(' ');
 }
 
-/** Lo que distingue dos modelos parecidos en una lista: cuánto mide y de dónde salió. */
+/** Lo que distingue dos modelos parecidos en una lista: cuánto mide y de dónde salió. Un
+ *  armario, además, su planta: dos de 42 U se distinguen por el ancho y el fondo. */
 function _dcimTypeNote(r) {
     const u = Number((r || {}).u_tenths || 0);
-    return [u ? `${u / 10} U` : '', String((r || {}).part_number || '')]
+    const m = String((r || {}).tree || '') === 'rack-types' ? _dcimRackFromModel(r) : {};
+    const planta = m.width_mm && m.depth_mm ? `${m.width_mm} × ${m.depth_mm} mm` : '';
+    return [u ? `${u / 10} U` : '', planta, String((r || {}).part_number || '')]
         .filter(Boolean).join(' · ');
+}
+
+/** Lo que la ficha de un armario del catálogo dice de las casillas del armario: su altura en U,
+ *  su planta exterior en milímetros (en pulgadas si la ficha las usa), la numeración, el fondo
+ *  entre mástiles (`mounting_depth`) y, de un armario de pared, que solo se llega por delante.
+ *  Lo que la ficha no dice no sale: proponer un número que nadie escribió es inventárselo. */
+function _dcimRackFromModel(m) {
+    const r = m || {};
+    let x = r.extra || {};
+    if (typeof x === 'string') { try { x = JSON.parse(x) || {}; } catch (e) { x = {}; } }
+    const fuera = {};
+    const mm = (v) => {
+        const n = Number(v);
+        if (!isFinite(n) || n <= 0) return 0;
+        return Math.round(String(x.outer_unit || 'mm') === 'in' ? n * 25.4 : n);
+    };
+    const u = Math.round(Number(r.u_tenths || 0) / 10);
+    if (u > 0) fuera.u_height = String(u);
+    if (mm(x.outer_width)) fuera.width_mm = String(mm(x.outer_width));
+    if (mm(x.outer_depth)) fuera.depth_mm = String(mm(x.outer_depth));
+    if (x.desc_units !== undefined && x.desc_units !== null && x.desc_units !== '')
+        fuera.desc_units = (x.desc_units === true || String(x.desc_units) === '1'
+                            || String(x.desc_units).toLowerCase() === 'true') ? '1' : '0';
+    const fondo = Math.round(Number(x.mounting_depth) || 0);
+    if (fondo > 0) fuera.rail_depth_mm = String(fondo);
+    // Las puertas: de un armario de pared solo se abre la de delante —la de detrás va contra la
+    // pared—, y eso es lo que dice `access`.
+    const forma = String(x.form_factor || '');
+    if (forma.startsWith('wall-') || String(x.form_mount || '') === 'wall') fuera.access = 'front';
+    return fuera;
+}
+
+/** Ofrecer las medidas del armario elegido. **Las casillas vacías se llenan** —nadie había dicho
+ *  nada y la ficha sí— y **las que ya dicen otra cosa se preguntan**, en el mismo cuadro: lo
+ *  medido con un metro manda sobre la ficha, y escribirlo encima sin decirlo es perderlo.
+ *
+ *  Vacía es sin escribir, y al crear un armario también la que sigue con su valor de partida
+ *  (42 U, 600 × 1000): ese número lo puso el formulario, no quien lo rellena. */
+function _dcimRackOffer(modelo, nombre) {
+    const f = _dcimForm;
+    if (!f || f.kind !== 'rack') return;
+    const spec = _DCIM_KIND.rack;
+    const row = (f.row = f.row || {});
+    const propone = _dcimRackFromModel(modelo);
+    const choca = [];
+    Object.keys(propone).forEach(campo => {
+        const fld = spec.fields.find(x => x.name === campo);
+        if (!fld) return;
+        const ahora = row[campo] === undefined || row[campo] === null ? '' : String(row[campo]);
+        const partida = fld.value !== undefined ? String(fld.value)
+                      : (fld.choices ? String(fld.choices[0]) : '');
+        const vacia = ahora === '' || (fld.type === 'number' && !fld.value && Number(ahora) === 0)
+                      || (f.mode === 'new' && ahora === partida);
+        if (ahora === propone[campo]) return;
+        if (vacia) row[campo] = propone[campo];
+        else choca.push({campo, ahora, propone: propone[campo]});
+    });
+    f.offer = choca.length ? {name: String(nombre || ''), fields: choca} : null;
+}
+
+/** Tomar, o no, lo que la ficha dice y el formulario ya decía distinto. */
+function _dcimRackOfferTake(si) {
+    const f = _dcimForm;
+    if (!f || !f.offer) return;
+    _dcimFormSnap();
+    if (si) f.offer.fields.forEach(x => { f.row[x.campo] = x.propone; });
+    f.offer = null;
+    _dcimFormDraw();
+}
+
+/** El aviso de lo que se pregunta: cada casilla con lo que dice ahora y lo que dice la ficha. */
+function _dcimRackOfferHtml(f) {
+    const o = (f || {}).offer;
+    if (!o || !(o.fields || []).length) return '';
+    const spec = _DCIM_KIND.rack;
+    const dice = (campo, v) => {
+        const fld = spec.fields.find(x => x.name === campo) || {};
+        return fld.choices ? t((fld.prefix || '') + v) : String(v);
+    };
+    return `<div class="alert alert-info py-2 ss-fs-2" id="dcim-rack-offer">
+        <div class="mb-1">${esc(tf('dcim_rack_model_offer', o.name))}</div>
+        <ul class="mb-2 ps-3">${o.fields.map(x => {
+            const fld = spec.fields.find(y => y.name === x.campo) || {};
+            return `<li><span class="fw-semibold">${esc(t(fld.label || x.campo))}</span>: ${
+                esc(dice(x.campo, x.ahora))} → ${esc(dice(x.campo, x.propone))}</li>`;
+        }).join('')}</ul>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcimRackOfferTake(true)">
+                <i class="bi bi-check2 me-1"></i>${esc(t('dcim_rack_model_take'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcimRackOfferTake(false)">
+                ${esc(t('dcim_rack_model_keep'))}</button>
+        </div>
+    </div>`;
 }
 
 /** Tomar el modelo elegido. El NOMBRE se queda en la pantalla y el identificador en la casilla:
  *  en la tabla va el segundo, que es lo que sigue siendo cierto el día que alguien corrija el
  *  nombre del modelo. */
 function _dcimPickTake(idx, uid, nombre) {
+    // La fila elegida, antes de olvidar la búsqueda: de un armario se ofrecen sus medidas.
+    const elegida = uid ? (((_dcimPick || {}).rows) || []).find(r => String(r.uid) === String(uid))
+                        : null;
     _dcimPick = null;
     if (!_dcimForm) return;
     const spec = _DCIM_KIND[_dcimForm.kind];
@@ -603,6 +714,10 @@ function _dcimPickTake(idx, uid, nombre) {
         // En la MISMA clave de la que lee la caja: si uno escribe donde el otro no mira, elegir
         // un modelo lo deja elegido y la casilla sigue enseñando el identificador anterior.
         row[fld.nameKey || (fld.name + '_name')] = String(nombre || '');
+    }
+    if (fld && fld.pickTree === 'rack-types') {
+        if (elegida) _dcimRackOffer(elegida, nombre);
+        else _dcimForm.offer = null;          // quitado el modelo, no queda nada que ofrecer
     }
     _dcimFormDraw();
 }
